@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["core", "desktop"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Nexoryx-business/paste-get"
+publish = false
+
+[workspace.lints.rust]
+# `deny` rather than `forbid`: UniFFI scaffolding will need a local `allow`.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+# Errors must be handled, not unwrapped. Tests are exempt (see clippy.toml).
+unwrap_used = "warn"
+expect_used = "warn"
