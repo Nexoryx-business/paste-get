@@ -26,6 +26,7 @@ with no button to press. Local-first, end-to-end encrypted, no account, no cloud
 | [`docs/AUDIT.md`](docs/AUDIT.md) | Technical audit: how every feature can be built, what's hard, what's impossible |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones and step-by-step plan |
 | [`docs/devices/xiaomi-hyperos.md`](docs/devices/xiaomi-hyperos.md) | Phone setup for Xiaomi / POCO / Redmi (HyperOS) |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to build, test and contribute |
 | [`CLAUDE.md`](CLAUDE.md) | Rules for AI-assisted development in this repo |
 
 ## Planned layout

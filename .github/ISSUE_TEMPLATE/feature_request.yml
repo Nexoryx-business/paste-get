@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an idea for paste-get
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Check [the roadmap](https://github.com/Nexoryx-business/paste-get/blob/HEAD/docs/ROADMAP.md) first, it may already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

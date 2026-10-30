@@ -11,7 +11,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] Choose a license: GPL-3.0-or-later
 - [x] Cargo workspace (`core`, `desktop`), `rustfmt`, `clippy`, `cargo-deny` config
 - [x] GitHub Actions: fmt + clippy + tests on Linux and Windows, `cargo-deny`, Dependabot
-- [ ] `CONTRIBUTING.md`, issue templates
+- [x] `CONTRIBUTING.md`, issue templates
 
 ### M1 — Protocol and core (`core/`, `proto/`)
 - [ ] `proto/` messages: `Hello`, `ClipOffer`, `ClipChunk`, `Ack`, `Ping`

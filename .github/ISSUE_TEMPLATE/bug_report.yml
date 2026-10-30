@@ -1,0 +1,68 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Never paste real clipboard contents, passwords or 2FA codes here.**
+        For security vulnerabilities, use private vulnerability reporting instead of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Take a screenshot on the phone
+        2. Press Ctrl+V on the PC
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: paste-get version
+      description: Output of `pasteget --version`, and the Android app version
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      placeholder: "POCO M8 5G, HyperOS 2.0, Android 15"
+  - type: dropdown
+    id: android-mode
+    attributes:
+      label: Android clipboard mode (shown on the health screen)
+      options:
+        - Shizuku
+        - Log monitoring (fallback)
+        - Manual
+        - Not sure
+  - type: dropdown
+    id: desktop-os
+    attributes:
+      label: Desktop OS
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux, KDE Plasma (Wayland)
+        - Linux, KDE Plasma (X11)
+        - Linux, Hyprland
+        - Linux, GNOME
+        - Linux, other
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output. Logs never contain clipboard contents, but check before pasting.
+      render: text
