@@ -23,6 +23,8 @@ allow = [
     "CC0-1.0",
 ]
 confidence-threshold = 0.9
+# The allow list is a policy, not a mirror of current dependencies.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
