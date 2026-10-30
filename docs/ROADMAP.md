@@ -10,7 +10,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 ### M0 — Foundations
 - [x] Choose a license: GPL-3.0-or-later
 - [x] Cargo workspace (`core`, `desktop`), `rustfmt`, `clippy`, `cargo-deny` config
-- [ ] GitHub Actions: fmt + clippy + tests on Linux and Windows
+- [x] GitHub Actions: fmt + clippy + tests on Linux and Windows, `cargo-deny`, Dependabot
 - [ ] `CONTRIBUTING.md`, issue templates
 
 ### M1 — Protocol and core (`core/`, `proto/`)
