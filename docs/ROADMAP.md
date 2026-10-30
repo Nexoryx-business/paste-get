@@ -8,7 +8,7 @@ Work top to bottom. The audit (`AUDIT.md`) explains the why.
 Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's there.
 
 ### M0 — Foundations
-- [ ] Choose a license
+- [x] Choose a license: GPL-3.0-or-later
 - [ ] Cargo workspace (`core`, `desktop`), `rustfmt`, `clippy`, `cargo-deny` config
 - [ ] GitHub Actions: fmt + clippy + tests on Linux and Windows
 - [ ] `CONTRIBUTING.md`, issue templates

@@ -41,4 +41,5 @@ paste-get/
 
 ## License
 
-To be decided before the first code lands.
+paste-get is free software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).
