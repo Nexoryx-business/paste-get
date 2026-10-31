@@ -4,8 +4,6 @@ Status: **draft**, may change without notice until v0.1 ships.
 The schema lives in [`proto/pasteget.proto`](../proto/pasteget.proto); this document explains
 how the messages are used. Both must change in the same commit.
 
-Sections still marked *(pending)* are filled in as the roadmap's M1 steps land.
-
 ## 1. Overview
 
 paste-get devices talk over a single long-lived connection per pair of devices.
@@ -89,6 +87,8 @@ before it.
 
 If the versions differ, the side with the higher version decides whether it can talk down;
 otherwise it closes the connection. Version 0 implementations close on any mismatch.
+
+`device_name` is untrusted: receivers sanitize it as in section 5.1.
 
 ### 4.2 Sending a clip: `ClipOffer`, `ClipChunk`, `Ack`
 

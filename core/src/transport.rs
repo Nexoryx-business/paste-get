@@ -27,7 +27,8 @@ use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
 
 use crate::framing::{FrameDecoder, FrameError, encode};
 use crate::identity::{DeviceId, Identity};
-use crate::proto::Envelope;
+use crate::pairing::sanitize_device_name;
+use crate::proto::{Envelope, Hello, PROTOCOL_VERSION, envelope::Payload};
 
 /// ALPN protocol name, also the protocol version marker on the wire.
 pub const ALPN: &[u8] = b"pasteget/0";
@@ -49,6 +50,12 @@ pub enum TransportError {
     WrongProtocol,
     #[error("device {0} is not trusted")]
     UntrustedPeer(DeviceId),
+    #[error("peer sent another message where {expected} was expected")]
+    UnexpectedMessage { expected: &'static str },
+    #[error("peer speaks protocol version {0}, this device speaks {PROTOCOL_VERSION}")]
+    VersionMismatch(u32),
+    #[error("peer closed the connection")]
+    Closed,
 }
 
 /// Connects to the device `expected_peer` over `io` (usually a `TcpStream`).
@@ -184,6 +191,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
                 return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
             }
             self.decoder.push(&self.read_buf[..read]);
+        }
+    }
+
+    /// Sends our [`Hello`] and returns the peer's. Must be the first exchange of a session.
+    pub async fn exchange_hello(&mut self, ours: Hello) -> Result<Hello, TransportError> {
+        self.send(&Envelope {
+            payload: Some(Payload::Hello(ours)),
+        })
+        .await?;
+        match self.recv().await? {
+            Some(Envelope {
+                payload: Some(Payload::Hello(mut theirs)),
+            }) => {
+                if theirs.protocol_version != PROTOCOL_VERSION {
+                    return Err(TransportError::VersionMismatch(theirs.protocol_version));
+                }
+                theirs.device_name = sanitize_device_name(&theirs.device_name);
+                Ok(theirs)
+            }
+            Some(_) => Err(TransportError::UnexpectedMessage { expected: "Hello" }),
+            None => Err(TransportError::Closed),
         }
     }
 
@@ -397,6 +425,55 @@ mod tests {
         assert!(matches!(
             unverified.authorize(|_| false),
             Err(TransportError::UntrustedPeer(id)) if id == stranger.device_id()
+        ));
+    }
+
+    fn hello(version: u32, name: &str) -> Hello {
+        Hello {
+            protocol_version: version,
+            device_name: name.into(),
+            app_version: "test".into(),
+            platform: crate::proto::Platform::Linux.into(),
+        }
+    }
+
+    async fn connected_pair() -> (
+        Connection<client::TlsStream<tokio::io::DuplexStream>>,
+        Connection<server::TlsStream<tokio::io::DuplexStream>>,
+    ) {
+        let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let (phone_io, pc_io) = duplex(64 * 1024);
+        let (client, server) = tokio::join!(connect(phone_io, &phone, pc.device_id()), async {
+            accept(pc_io, &pc).await?.authorize(|_| true)
+        });
+        (client.unwrap(), server.unwrap())
+    }
+
+    #[tokio::test]
+    async fn hello_exchange_returns_the_peer_hello() {
+        let (mut client, mut server) = connected_pair().await;
+
+        let (from_server, from_client) = tokio::join!(
+            client.exchange_hello(hello(PROTOCOL_VERSION, "POCO")),
+            server.exchange_hello(hello(PROTOCOL_VERSION, "PC\u{7}"))
+        );
+
+        assert_eq!(from_server.unwrap().device_name, "PC");
+        assert_eq!(from_client.unwrap().device_name, "POCO");
+    }
+
+    #[tokio::test]
+    async fn hello_exchange_refuses_other_versions() {
+        let (mut client, mut server) = connected_pair().await;
+
+        let (from_server, _) = tokio::join!(
+            client.exchange_hello(hello(PROTOCOL_VERSION, "POCO")),
+            server.exchange_hello(hello(PROTOCOL_VERSION + 1, "Future PC"))
+        );
+
+        assert!(matches!(
+            from_server,
+            Err(TransportError::VersionMismatch(v)) if v == PROTOCOL_VERSION + 1
         ));
     }
 

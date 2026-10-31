@@ -19,8 +19,10 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] Device identity (keypair) + mutual TLS with pinned keys
 - [x] Pairing payload (what the QR encodes) + one-time secret
 - [x] Echo-loop guard (origin + hash)
-- [ ] `docs/PROTOCOL.md` v0
+- [x] `docs/PROTOCOL.md` v0
+- [x] Clip transfer (offer, chunks, ack) and `Hello` exchange
 - **Done when:** two test peers in `cargo test` pair and exchange text and a PNG.
+  ✅ `core/tests/end_to_end.rs`
 
 ### M2 — Desktop daemon, headless (`desktop/`)
 - [ ] `pasteget daemon`: watch and set the clipboard (text + image) through `arboard`
