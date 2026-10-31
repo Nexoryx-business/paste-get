@@ -24,7 +24,37 @@ phone                                   PC
   │── Pong ──────────────────────────────▶│
 ```
 
-## 2. Transport *(pending)*
+## 2. Transport and trust
+
+### 2.1 Device identity
+
+Each device has an **Ed25519 key pair**, generated on first launch and kept in the OS keystore.
+Its **device ID** is the SHA-256 of the public key's DER-encoded SubjectPublicKeyInfo:
+32 bytes, shown as 52 characters of unpadded uppercase base32 (RFC 4648).
+
+The key is wrapped in a self-signed X.509 certificate only because TLS needs one. Nothing in the
+certificate except the public key is meaningful: names, validity dates and serial numbers are
+ignored, and the certificate may be regenerated at any time without changing the device ID.
+
+### 2.2 TLS
+
+- TCP, then **TLS 1.3 only**, with ALPN `pasteget/0`. A peer that doesn't negotiate this ALPN
+  is disconnected.
+- **Both sides present a certificate** (mutual TLS).
+- The connecting side sends no SNI (the server name is an IP address).
+
+### 2.3 Who is trusted
+
+- **The connecting side pins the device ID** of the device it wants to reach: if the server's
+  public key hashes to anything else, the handshake fails. No certificate authority is involved.
+- **The accepting side** requires a client certificate and lets TLS verify the client holds its
+  key, but accepts any key at the TLS level, because an unknown device may be pairing (section 5).
+  Right after the handshake it looks up the client's device ID:
+  - **paired device** → normal session;
+  - **pairing window open** → the client must complete pairing (section 5) as its first message;
+  - **otherwise** → close the connection before reading anything.
+
+In version 0, the PC accepts connections and the phone connects.
 
 ## 3. Framing
 

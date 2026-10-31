@@ -55,6 +55,11 @@ impl FrameDecoder {
         self.buf.extend_from_slice(bytes);
     }
 
+    /// Bytes received but not yet returned as an envelope.
+    pub fn buffered_len(&self) -> usize {
+        self.buf.len()
+    }
+
     /// Returns the next complete envelope, or `None` if more bytes are needed.
     pub fn next_envelope(&mut self) -> Result<Option<Envelope>, FrameError> {
         let Some(header) = self.buf.get(..HEADER_LEN) else {

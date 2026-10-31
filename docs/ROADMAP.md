@@ -16,7 +16,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 ### M1 — Protocol and core (`core/`, `proto/`)
 - [x] `proto/` messages: `Hello`, `ClipOffer`, `ClipChunk`, `Ack`, `Ping`, `Pong`
 - [x] Length-prefixed framing + decoder fuzz target
-- [ ] Device identity (keypair) + mutual TLS with pinned keys
+- [x] Device identity (keypair) + mutual TLS with pinned keys
 - [ ] Pairing payload (what the QR encodes) + one-time secret
 - [ ] Echo-loop guard (origin + hash)
 - [ ] `docs/PROTOCOL.md` v0
