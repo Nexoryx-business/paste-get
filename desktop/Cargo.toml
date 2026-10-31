@@ -13,14 +13,21 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+arboard = { version = "3", features = ["wayland-data-control"] }
 dirs = "7"
 gethostname = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 pasteget-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
 toml = "0.9"
+tracing = "0.1"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_DataExchange"] }

@@ -21,6 +21,8 @@ allow = [
     "Unicode-3.0",
     "MPL-2.0",
     "CC0-1.0",
+    # Boost: permissive, GPL-compatible per the FSF. Used by clipboard-win.
+    "BSL-1.0",
 ]
 confidence-threshold = 0.9
 # The allow list is a policy, not a mirror of current dependencies.
