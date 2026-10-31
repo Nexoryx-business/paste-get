@@ -26,7 +26,22 @@ phone                                   PC
 
 ## 2. Transport *(pending)*
 
-## 3. Framing *(pending)*
+## 3. Framing
+
+Inside the TLS stream, each message is one frame:
+
+```
+┌───────────────────────┬──────────────────────────────┐
+│ length: u32 big-endian│ Envelope (Protobuf), length B│
+└───────────────────────┴──────────────────────────────┘
+```
+
+- `length` counts the Envelope bytes only, not the 4-byte header.
+- **Maximum `length`: 1 MiB (1 048 576).** A receiver that reads a larger length closes the
+  connection without reading the body.
+- `length = 0` is valid: an Envelope with no payload. Receivers ignore Envelopes whose payload
+  they don't know (that's how newer peers add messages).
+- A frame that doesn't decode as an Envelope is a fatal error: close the connection.
 
 ## 4. Messages
 

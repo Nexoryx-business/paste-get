@@ -33,6 +33,18 @@ cargo test --workspace
 cargo deny check          # cargo install cargo-deny
 ```
 
+### Fuzzing
+
+Parsers of untrusted input have fuzz targets in `fuzz/`. They need a nightly toolchain:
+
+```sh
+cargo +nightly install cargo-fuzz
+cd fuzz
+cargo +nightly fuzz run frame_decoder -- -max_total_time=60
+```
+
+CI runs every target for 60 seconds. A new parser needs a new target.
+
 ## Rules
 
 - **One change per pull request**, with tests.

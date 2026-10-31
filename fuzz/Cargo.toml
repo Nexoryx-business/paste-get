@@ -1,0 +1,23 @@
+[package]
+name = "pasteget-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pasteget-core = { path = "../core" }
+
+# Kept out of the main workspace: fuzzing needs a nightly toolchain.
+[workspace]
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+bench = false
