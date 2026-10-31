@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// paste-get wire protocol, version 0. See docs/PROTOCOL.md.
+// Any change here must update docs/PROTOCOL.md in the same commit.
+
+syntax = "proto3";
+
+package pasteget.v0;
+
+// Every frame on the wire carries exactly one Envelope.
+message Envelope {
+  oneof payload {
+    Hello hello = 1;
+    ClipOffer clip_offer = 2;
+    ClipChunk clip_chunk = 3;
+    Ack ack = 4;
+    Ping ping = 5;
+    Pong pong = 6;
+  }
+}
+
+// First message each side sends after the TLS handshake.
+message Hello {
+  // Wire protocol version spoken by the sender. Currently 0.
+  uint32 protocol_version = 1;
+  // Human-readable name, e.g. "POCO M8 5G" or "HP-AIO (Windows)".
+  string device_name = 2;
+  // Version of the sending app, for diagnostics.
+  string app_version = 3;
+  Platform platform = 4;
+}
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID = 1;
+  PLATFORM_WINDOWS = 2;
+  PLATFORM_LINUX = 3;
+  PLATFORM_MACOS = 4;
+}
+
+// Announces a clip. Its bytes follow in ClipChunk messages.
+message ClipOffer {
+  // Random 16-byte identifier chosen by the sender.
+  bytes clip_id = 1;
+  // Device ID (32 bytes) of the device where the clip was first copied.
+  // Used to break echo loops when clips are relayed.
+  bytes origin_device = 2;
+  // SHA-256 of the clip bytes. The receiver must verify it.
+  bytes sha256 = 3;
+  // MIME type of the bytes, e.g. "text/plain;charset=utf-8" or "image/png".
+  string mime_type = 4;
+  // Total size of the clip in bytes.
+  uint64 size = 5;
+  // The source marked the clip as sensitive (password, 2FA code...).
+  // Receivers must keep it out of history and clipboard managers.
+  bool sensitive = 6;
+}
+
+// A slice of a clip's bytes. Chunks are sent in order, without gaps.
+message ClipChunk {
+  bytes clip_id = 1;
+  // Position of `data` in the clip.
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Sent by the receiver once a clip is complete, or when it is rejected.
+message Ack {
+  bytes clip_id = 1;
+  AckStatus status = 2;
+}
+
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  // The clip was received and its hash verified.
+  ACK_STATUS_OK = 1;
+  // The hash did not match the offer.
+  ACK_STATUS_HASH_MISMATCH = 2;
+  // The clip is larger than the receiver accepts.
+  ACK_STATUS_TOO_LARGE = 3;
+  // The MIME type is not supported by the receiver.
+  ACK_STATUS_UNSUPPORTED_TYPE = 4;
+  // Chunks arrived out of order or for an unknown clip.
+  ACK_STATUS_PROTOCOL_ERROR = 5;
+}
+
+// Keepalive. The peer answers with a Pong carrying the same nonce.
+message Ping {
+  uint64 nonce = 1;
+}
+
+message Pong {
+  uint64 nonce = 1;
+}

@@ -4,6 +4,8 @@
 //!
 //! This crate must not contain OS-specific code; desktop and Android apps wrap it.
 
+pub mod proto;
+
 /// Version of this crate, reported by the apps that embed it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
