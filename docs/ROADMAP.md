@@ -69,6 +69,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 
 ## v0.2 — "smart"
 History + search, 2FA codes, PC-side OCR, sensitive filters, auto-crop, smart actions.
+Desktop identity key in the OS keystore when one is available (M2 stores it in a user-only file,
+like SSH keys, because Hyprland setups often run no Secret Service).
 
 ## v0.3 — "deep"
 Insert from phone (camera), links both ways, files, multiple PCs, GNOME extension.

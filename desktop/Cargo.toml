@@ -12,7 +12,15 @@ name = "pasteget"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+dirs = "7"
+gethostname = "1"
 pasteget-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"
