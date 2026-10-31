@@ -16,6 +16,7 @@ anyhow = "1"
 arboard = { version = "3", features = ["wayland-data-control"] }
 dirs = "7"
 gethostname = "1"
+if-addrs = "0.15.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pasteget-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
