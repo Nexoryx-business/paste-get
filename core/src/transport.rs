@@ -22,7 +22,7 @@ use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, DistinguishedName, ServerConfig,
     SignatureScheme,
 };
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
 
 use crate::framing::{FrameDecoder, FrameError, encode};
@@ -148,19 +148,15 @@ impl<S> UnverifiedConnection<S> {
 /// An authenticated connection to a known device.
 #[derive(Debug)]
 pub struct Connection<S> {
-    stream: S,
+    io: EnvelopeReader<S>,
     peer: DeviceId,
-    decoder: FrameDecoder,
-    read_buf: Vec<u8>,
 }
 
 impl<S> Connection<S> {
     fn new(stream: S, peer: DeviceId) -> Self {
         Self {
-            stream,
+            io: EnvelopeReader::new(stream),
             peer,
-            decoder: FrameDecoder::new(),
-            read_buf: vec![0; READ_BUF_LEN],
         }
     }
 
@@ -171,27 +167,26 @@ impl<S> Connection<S> {
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     pub async fn send(&mut self, envelope: &Envelope) -> Result<(), TransportError> {
-        let frame = encode(envelope)?;
-        self.stream.write_all(&frame).await?;
-        self.stream.flush().await?;
-        Ok(())
+        write_frame(&mut self.io.inner, envelope).await
     }
 
     /// Next envelope from the peer, or `None` once the peer has closed the connection cleanly.
     pub async fn recv(&mut self) -> Result<Option<Envelope>, TransportError> {
-        loop {
-            if let Some(envelope) = self.decoder.next_envelope()? {
-                return Ok(Some(envelope));
-            }
-            let read = self.stream.read(&mut self.read_buf).await?;
-            if read == 0 {
-                if self.decoder.buffered_len() == 0 {
-                    return Ok(None);
-                }
-                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
-            }
-            self.decoder.push(&self.read_buf[..read]);
-        }
+        self.io.recv().await
+    }
+
+    /// Splits the connection so reading and writing can happen in different tasks.
+    ///
+    /// A long session must keep reading while it sends: if both peers send large clips at once
+    /// and neither reads, both block forever once the TCP buffers are full.
+    pub fn into_split(self) -> (EnvelopeReader<ReadHalf<S>>, EnvelopeWriter<WriteHalf<S>>) {
+        let (read_half, write_half) = tokio::io::split(self.io.inner);
+        let reader = EnvelopeReader {
+            inner: read_half,
+            decoder: self.io.decoder,
+            read_buf: self.io.read_buf,
+        };
+        (reader, EnvelopeWriter { inner: write_half })
     }
 
     /// Sends our [`Hello`] and returns the peer's. Must be the first exchange of a session.
@@ -217,9 +212,76 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
 
     /// Closes the connection, telling the peer it was intentional.
     pub async fn close(mut self) -> Result<(), TransportError> {
-        self.stream.shutdown().await?;
+        self.io.inner.shutdown().await?;
         Ok(())
     }
+}
+
+/// Receiving side of a connection: decodes frames from a byte stream.
+#[derive(Debug)]
+pub struct EnvelopeReader<R> {
+    inner: R,
+    decoder: FrameDecoder,
+    read_buf: Vec<u8>,
+}
+
+impl<R> EnvelopeReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            decoder: FrameDecoder::new(),
+            read_buf: vec![0; READ_BUF_LEN],
+        }
+    }
+}
+
+impl<R: AsyncRead + Unpin> EnvelopeReader<R> {
+    /// Next envelope from the peer, or `None` once the peer has closed the connection cleanly.
+    ///
+    /// Cancel-safe: dropping the future loses no data, so it can be used in `tokio::select!`.
+    pub async fn recv(&mut self) -> Result<Option<Envelope>, TransportError> {
+        loop {
+            if let Some(envelope) = self.decoder.next_envelope()? {
+                return Ok(Some(envelope));
+            }
+            let read = self.inner.read(&mut self.read_buf).await?;
+            if read == 0 {
+                if self.decoder.buffered_len() == 0 {
+                    return Ok(None);
+                }
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            }
+            self.decoder.push(&self.read_buf[..read]);
+        }
+    }
+}
+
+/// Sending side of a connection.
+#[derive(Debug)]
+pub struct EnvelopeWriter<W> {
+    inner: W,
+}
+
+impl<W: AsyncWrite + Unpin> EnvelopeWriter<W> {
+    pub async fn send(&mut self, envelope: &Envelope) -> Result<(), TransportError> {
+        write_frame(&mut self.inner, envelope).await
+    }
+
+    /// Closes the connection, telling the peer it was intentional.
+    pub async fn close(mut self) -> Result<(), TransportError> {
+        self.inner.shutdown().await?;
+        Ok(())
+    }
+}
+
+async fn write_frame<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    envelope: &Envelope,
+) -> Result<(), TransportError> {
+    let frame = encode(envelope)?;
+    writer.write_all(&frame).await?;
+    writer.flush().await?;
+    Ok(())
 }
 
 fn provider() -> Arc<CryptoProvider> {
@@ -475,6 +537,61 @@ mod tests {
             from_server,
             Err(TransportError::VersionMismatch(v)) if v == PROTOCOL_VERSION + 1
         ));
+    }
+
+    #[tokio::test]
+    async fn split_halves_send_large_frames_both_ways_at_once() {
+        use crate::proto::ClipChunk;
+
+        let (client, server) = connected_pair().await;
+        let (mut client_rx, mut client_tx) = client.into_split();
+        let (mut server_rx, mut server_tx) = server.into_split();
+        let big = |byte| Envelope {
+            payload: Some(Payload::ClipChunk(ClipChunk {
+                clip_id: vec![byte; 16],
+                offset: 0,
+                data: vec![byte; 512 * 1024],
+            })),
+        };
+        let count = 8; // Far more than the 64 KiB duplex buffer holds.
+
+        let (sent_a, sent_b, got_a, got_b) = tokio::join!(
+            async {
+                for _ in 0..count {
+                    client_tx.send(&big(1)).await?;
+                }
+                Ok::<_, TransportError>(())
+            },
+            async {
+                for _ in 0..count {
+                    server_tx.send(&big(2)).await?;
+                }
+                Ok::<_, TransportError>(())
+            },
+            async {
+                let mut received = 0;
+                while received < count {
+                    if server_rx.recv().await?.is_some() {
+                        received += 1;
+                    }
+                }
+                Ok::<_, TransportError>(received)
+            },
+            async {
+                let mut received = 0;
+                while received < count {
+                    if client_rx.recv().await?.is_some() {
+                        received += 1;
+                    }
+                }
+                Ok::<_, TransportError>(received)
+            }
+        );
+
+        sent_a.unwrap();
+        sent_b.unwrap();
+        assert_eq!(got_a.unwrap(), count);
+        assert_eq!(got_b.unwrap(), count);
     }
 
     #[tokio::test]
