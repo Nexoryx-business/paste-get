@@ -55,7 +55,7 @@ jobs:
           cargo install cargo-ndk --locked
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-37.2" "build-tools;36.0.0" "ndk;30.0.16248370" > /dev/null
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Build, unit tests and lint
         working-directory: android
         run: ./gradlew assembleFossDebug testFossDebugUnitTest lintFossDebug
