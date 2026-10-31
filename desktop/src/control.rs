@@ -102,11 +102,27 @@ impl Endpoint {
                     .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
                     .collect()
             };
+            // The directory's fingerprint keeps profiles with the same name but different
+            // locations (PASTEGET_HOME, tests) on separate pipes.
+            let location = fnv1a(profile.dir().to_string_lossy().as_bytes());
             Self {
-                pipe_name: format!(r"\\.\pipe\paste-get-{}-{}", safe(&user), profile.name()),
+                pipe_name: format!(
+                    r"\\.\pipe\paste-get-{}-{}-{location:016x}",
+                    safe(&user),
+                    profile.name()
+                ),
             }
         }
     }
+}
+
+/// FNV-1a: a tiny hash that stays the same across builds, so a newer `pasteget` command still
+/// finds a daemon started by an older one. Not a security measure.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// Serves control requests for `daemon` until the returned handle is aborted.
@@ -458,6 +474,14 @@ mod tests {
         };
         assert_eq!(status.devices.len(), 1);
         assert!(status.devices[0].connected);
+    }
+
+    #[test]
+    fn fnv1a_matches_the_reference_values() {
+        // Published FNV-1a 64-bit test vectors: the pipe name must never change between builds.
+        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
     }
 
     #[tokio::test]
