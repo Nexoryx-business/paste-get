@@ -12,7 +12,10 @@ before any public release. These rules keep the code reviewable.
 
 - `core/`: Rust library. Protocol, crypto, pairing, history. No platform code here.
 - `desktop/`: Rust daemon + CLI first, Tauri 2 tray UI later.
-- `android/`: Kotlin + Jetpack Compose. Uses `core` through UniFFI (built with `cargo-ndk`).
+- `ffi/`: the phone API (`PhoneClient`) exported to Kotlin with UniFFI. `uniffi-bindgen/` generates
+  the bindings.
+- `android/`: Kotlin + Jetpack Compose. Gradle builds `ffi` with `cargo-ndk` and generates the
+  bindings itself.
 - `proto/`: Protobuf definitions. **`docs/PROTOCOL.md` must be updated in the same commit
   as any change here.**
 
@@ -36,5 +39,6 @@ Tier 2 (best effort): macOS, GNOME, other Android vendors.
 7. **Hidden Android APIs** (via Shizuku) go behind an interface with a fallback, because their signatures
    change between Android versions and vendors.
 8. Code, comments, commits and docs are in **English**. Chat can be in any language.
-9. Before finishing a task: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`
-   (and the Gradle equivalents once `android/` exists).
+9. Before finishing a task: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+   `cargo test --workspace`, and for Android changes, in `android/`:
+   `./gradlew assembleFossDebug testFossDebugUnitTest lintFossDebug` (lint warnings are errors).

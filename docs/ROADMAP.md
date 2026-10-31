@@ -33,13 +33,18 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - **Done when:** two daemons (different profiles on one machine) sync clipboards.
 
 ### M3 — Android skeleton (`android/`)
-- [ ] Compose app, `foss` flavor, Rust core through UniFFI + `cargo-ndk`
-- [ ] `connectedDevice` foreground service with status notification
-- [ ] Pairing by scanning the QR code
-- [ ] Manual sending: share sheet + Quick Settings tile
+- [x] Session engine moved into `core` so phone and desktop share it
+- [x] `ffi/`: phone API through UniFFI, tested against a real desktop daemon
+- [x] Compose app, `foss` flavor, Rust core through UniFFI + `cargo-ndk`
+- [x] `connectedDevice` foreground service with status notification
+- [x] Pairing by scanning the QR code (in-app scanner or system camera)
+- [x] Manual sending: share sheet + Quick Settings tile
+- [ ] Verified on the POCO M8 5G
 - **Done when:** sharing text from the POCO puts it on the PC clipboard.
+  ✅ in `ffi/tests/phone_and_pc.rs` against a real daemon; pending on the real phone.
 
 ### M4 — Screenshots
+- [ ] Phone finds its computers again by mDNS when their address changes
 - [ ] MediaStore observer, screenshot folder detection, `IS_PENDING` handling
 - [ ] Send PNG; the PC sets it as an image and shows a "Received ✓" notification
 - [ ] Measure latency (target < 1 s on LAN)

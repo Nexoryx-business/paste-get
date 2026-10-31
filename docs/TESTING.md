@@ -1,8 +1,7 @@
 # Testing paste-get on real machines
 
-Automated tests use in-memory clipboards. Only a real desktop can show whether the **system
-clipboard** works. This guide checks it with what exists today (M2): the desktop daemon,
-before the Android app.
+Automated tests use in-memory clipboards. Only real machines can show whether the **system
+clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -92,9 +91,47 @@ failures, attach the output of terminals 1 and 2 and of `pasteget status`.
 | KDE Plasma 6 (Wayland) | | | | | | | |
 | Hyprland | | | | | | | |
 
-## Known limitations (M2)
+## 5. The phone (M3)
 
-- Changes are detected by polling every 0.5 s. On Linux this re-reads images while one sits on
+What the Android app does so far: pair by QR code, then send text or images **by hand** (share
+sheet, Quick Settings tile, or the button in the app). Text sent from the PC lands on the phone
+clipboard. Automatic sync of every copy comes with Shizuku (M5).
+
+### Install the app
+
+The CI builds a debug APK on every push. On GitHub: **Actions** → latest **CI** run →
+**Artifacts** → `paste-get-android-debug`. Unzip it, copy the `.apk` to the phone and open it
+(allow installing from that source when asked).
+
+With `adb` and USB debugging instead: `adb install -r app-foss-debug.apk`.
+
+Then follow [`devices/xiaomi-hyperos.md`](devices/xiaomi-hyperos.md), section 3 (Autostart, no
+battery restrictions), or HyperOS will stop the connection in the background.
+
+### Checklist
+
+The phone and the PC must be on the **same Wi-Fi**. On the PC, run `pasteget daemon`.
+
+| # | Do this | Expected |
+|---|---|---|
+| P1 | Open paste-get, allow notifications | A persistent "paste-get" notification appears |
+| P2 | PC: `pasteget pair`. Phone: **Pair a computer**, scan the code | Phone: "Paired with …", then "Connected to 1 computer". PC: `✓ Paired with …` |
+| P3 | In any app, select text → **Share** → **Send to PC**, then `Ctrl+V` on the PC | The text is pasted |
+| P4 | Gallery → a screenshot → **Share** → **Send to PC**, then paste on the PC (Paint, GIMP, Discord) | The image is pasted |
+| P5 | Add the **Send clipboard** tile to Quick Settings. Copy text, pull down the shade, tap the tile | "Sent to 1 computer"; `Ctrl+V` on the PC pastes it |
+| P6 | PC: `pasteget send "depuis le PC"`, then long-press a text field on the phone → Paste | `depuis le PC` is pasted |
+| P7 | Lock the phone for 5 minutes, unlock, repeat P3 | Still works, without opening the app |
+| P8 | Restart the phone, wait a minute, repeat P3 | Still works (the app restarts on boot) |
+| P9 | Scan the PC's pairing QR code with the **normal camera app** (only if it offers to open the link; not every camera does) | paste-get opens and pairs |
+
+Phone logs never contain clipboard contents either. To get them: `adb logcat -s paste-get`.
+
+## Known limitations
+
+- The phone only knows the PC addresses from the pairing code. If the PC gets a new IP address
+  (DHCP), pair again. Finding the PC by mDNS is planned (M4).
+- Images sent from the PC to the phone are ignored for now (M6).
+- Changes on the PC are detected by polling every 0.5 s. On Linux this re-reads images while one sits on
   the clipboard (row 6 measures the cost). Native change events are planned.
 - IPv4 only.
 - The identity key is a file readable only by your user, not yet in the OS keystore.

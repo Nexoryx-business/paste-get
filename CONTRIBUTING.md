@@ -33,6 +33,21 @@ cargo test --workspace
 cargo deny check          # cargo install cargo-deny
 ```
 
+### Android app
+
+Needs a JDK 17+, the Android SDK (platform `android-37.2`, build-tools, NDK
+`30.0.16248370`), the Rust targets and `cargo-ndk`:
+
+```sh
+rustup target add aarch64-linux-android x86_64-linux-android
+cargo install cargo-ndk
+cd android
+./gradlew assembleFossDebug testFossDebugUnitTest lintFossDebug
+```
+
+Gradle builds the Rust library and generates the Kotlin bindings itself. Android Studio works
+too: open the `android/` folder.
+
 ### Fuzzing
 
 Parsers of untrusted input have fuzz targets in `fuzz/`. They need a nightly toolchain:

@@ -6,8 +6,9 @@
 Copy something or take a screenshot on the phone, and it's already on your PC's clipboard,
 with no button to press. Local-first, end-to-end encrypted, no account, no cloud.
 
-> **Status: pre-alpha.** The protocol core and the desktop daemon work; the Android app doesn't
-> exist yet. You can already try the desktop side, see [`docs/TESTING.md`](docs/TESTING.md).
+> **Status: pre-alpha.** The protocol core, the desktop daemon and a first Android app work:
+> share text or an image from the phone and it lands on the PC clipboard. Automatic sync of
+> every copy (through Shizuku) is next. See [`docs/TESTING.md`](docs/TESTING.md) to try it.
 > The name is a working title.
 
 ## Planned highlights
@@ -44,14 +45,17 @@ with a second, in-memory daemon standing in for the phone.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to build, test and contribute |
 | [`CLAUDE.md`](CLAUDE.md) | Rules for AI-assisted development in this repo |
 
-## Planned layout
+## Layout
 
 ```
 paste-get/
-├─ core/       Rust: protocol, crypto, pairing, history (shared by every app)
-├─ proto/      Protobuf message definitions
-├─ desktop/    Rust daemon + CLI, then a Tauri 2 tray app (Windows, Linux, macOS)
-├─ android/    Kotlin + Jetpack Compose app, Shizuku service, core via UniFFI
+├─ core/            Rust: protocol, crypto, pairing, sessions (shared by every app)
+├─ proto/           Protobuf message definitions
+├─ desktop/         Rust daemon + `pasteget` CLI (Windows, Linux, macOS); tray app later
+├─ ffi/             The phone API, exported to Kotlin with UniFFI
+├─ uniffi-bindgen/  Generates the Kotlin bindings
+├─ android/         Kotlin + Jetpack Compose app
+├─ fuzz/            Fuzz targets for every parser of untrusted input
 └─ docs/
 ```
 
