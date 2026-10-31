@@ -10,6 +10,7 @@ pub mod framing;
 pub mod identity;
 pub mod pairing;
 pub mod proto;
+pub mod session;
 pub mod transport;
 
 /// Version of this crate, reported by the apps that embed it.

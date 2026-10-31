@@ -11,43 +11,29 @@
 //! Devices that paired with us (phones) connect in. Devices we paired with by scanning their
 //! code (`pasteget join`) are dialed out and redialed after disconnects.
 
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use pasteget_core::clip::{self, Clip, ClipReceiver, Received};
+use pasteget_core::clip::Clip;
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, PairingWindow};
-use pasteget_core::proto::envelope::Payload;
-use pasteget_core::proto::{AckStatus, Envelope, Hello, PROTOCOL_VERSION, Ping, Platform, Pong};
-use pasteget_core::transport::{self, Connection, EnvelopeReader, EnvelopeWriter};
-use tokio::io::{AsyncRead, AsyncWrite};
+use pasteget_core::proto::{Hello, PROTOCOL_VERSION, Platform};
+use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, RECONNECT_MIN, SessionEvents};
+use pasteget_core::transport;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 use tokio::task::JoinSet;
-use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
+use tokio::time::{sleep, timeout};
 
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
 use crate::config::{KnownDevice, KnownDevices, Profile};
 use crate::discovery::Advertiser;
 
-/// Time allowed for the TLS handshake and the Hello exchange.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time a not-yet-paired device has to send its pairing request.
 const PAIRING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-/// A ping is sent this often on every session.
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-/// A session that hears nothing for this long is considered dead.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
-/// Delay between reconnection attempts to joined devices, doubling up to the maximum.
-const RECONNECT_MIN: Duration = Duration::from_secs(1);
-const RECONNECT_MAX: Duration = Duration::from_secs(30);
-/// Clips waiting to be written to one device. Beyond that, new local copies skip that device.
-const OUTGOING_QUEUE: usize = 16;
 
 /// How to run a daemon.
 #[derive(Clone, Debug)]
@@ -110,22 +96,11 @@ struct Shared {
     advertised_ips: Option<Vec<IpAddr>>,
     known: Mutex<KnownDevices>,
     pairing: AsyncMutex<Option<PairingWindow>>,
-    peers: Mutex<HashMap<DeviceId, PeerHandle>>,
+    peers: Peers,
     guard: Mutex<EchoGuard>,
     clipboard: ClipboardWatcher,
     events: broadcast::Sender<Event>,
     tasks: Mutex<JoinSet<()>>,
-    next_session: AtomicU64,
-}
-
-struct PeerHandle {
-    session: u64,
-    outgoing: mpsc::Sender<Outgoing>,
-}
-
-enum Outgoing {
-    Clip(Clip),
-    Envelope(Envelope),
 }
 
 impl Daemon {
@@ -156,11 +131,10 @@ impl Daemon {
             advertised_ips: options.advertised_ips,
             known: Mutex::new(known),
             pairing: AsyncMutex::new(None),
-            peers: Mutex::new(HashMap::new()),
+            peers: Peers::new(),
             clipboard,
             events,
             tasks: Mutex::new(JoinSet::new()),
-            next_session: AtomicU64::new(0),
         });
 
         shared.spawn(accept_loop(Arc::clone(&shared), listener));
@@ -272,7 +246,7 @@ impl Daemon {
             sensitive: content.sensitive,
             origin: self.device_id(),
         };
-        self.shared.broadcast(&clip, None)
+        self.shared.peers.broadcast(&clip, None)
     }
 
     pub async fn status(&self) -> Status {
@@ -283,7 +257,7 @@ impl Daemon {
             .await
             .as_ref()
             .is_some_and(|window| window.is_open(Instant::now()));
-        let connected: Vec<DeviceId> = lock(&self.shared.peers).keys().copied().collect();
+        let connected = self.shared.peers.connected();
         let devices = lock(&self.shared.known)
             .iter()
             .map(|device| DeviceStatus {
@@ -353,21 +327,33 @@ impl Shared {
         known.insert(device);
         self.profile.save_known_devices(&known)
     }
+}
 
-    /// Queues `clip` for every connected device except `except`. Returns how many.
-    fn broadcast(&self, clip: &Clip, except: Option<DeviceId>) -> usize {
-        let peers = lock(&self.peers);
-        let mut queued = 0;
-        for (id, peer) in peers.iter() {
-            if Some(*id) == except {
-                continue;
-            }
-            match peer.outgoing.try_send(Outgoing::Clip(clip.clone())) {
-                Ok(()) => queued += 1,
-                Err(_) => tracing::warn!(peer = %id, "device is not keeping up, clip skipped"),
-            }
+/// Received clips go to the clipboard and on to the other devices.
+impl SessionEvents for Shared {
+    fn connected(&self, peer: DeviceId, hello: &Hello) {
+        tracing::info!(device = %hello.device_name, id = %peer, "connected");
+    }
+
+    fn disconnected(&self, peer: DeviceId) {
+        tracing::info!(id = %peer, "disconnected");
+    }
+
+    fn clip_received(&self, peer: DeviceId, clip: Clip) {
+        // A clip that started here and came back through another device: drop it.
+        if !lock(&self.guard).accepts_origin(&clip.origin) {
+            return;
         }
-        queued
+        lock(&self.guard).applied_remote(&clip);
+        let content = Content {
+            mime_type: clip.mime_type.clone(),
+            data: clip.data.clone(),
+            sensitive: clip.sensitive,
+        };
+        if let Err(e) = self.clipboard.write(content) {
+            tracing::warn!(error = %e, "received clip not applied");
+        }
+        self.peers.broadcast(&clip, Some(peer));
     }
 }
 
@@ -406,7 +392,8 @@ async fn handle_incoming(shared: Arc<Shared>, socket: TcpStream) -> Result<()> {
 
     if lock(&shared.known).contains(&peer) {
         let connection = unverified.authorize(|id| lock(&shared.known).contains(id))?;
-        return run_session(shared, connection).await;
+        session::run_session(connection, shared.hello(), &shared.peers, &*shared).await?;
+        return Ok(());
     }
 
     let mut slot = shared.pairing.lock().await;
@@ -441,174 +428,16 @@ async fn handle_incoming(shared: Arc<Shared>, socket: TcpStream) -> Result<()> {
 
 /// Keeps a connection to a device we joined, redialing with backoff.
 async fn dial_loop(shared: Arc<Shared>, device: KnownDevice) {
-    let mut delay = RECONNECT_MIN;
-    loop {
-        for address in &device.addresses {
-            let connected = timeout(HANDSHAKE_TIMEOUT, async {
-                let socket = TcpStream::connect(address).await?;
-                transport::connect(socket, &shared.identity, device.id)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await;
-            match connected {
-                Ok(Ok(connection)) => {
-                    delay = RECONNECT_MIN;
-                    if let Err(e) = run_session(Arc::clone(&shared), connection).await {
-                        tracing::info!(device = %device.name, error = %e, "session ended");
-                    }
-                    break;
-                }
-                Ok(Err(e)) => {
-                    tracing::debug!(device = %device.name, %address, error = %e, "dial failed")
-                }
-                Err(_) => tracing::debug!(device = %device.name, %address, "dial timed out"),
-            }
-        }
-        sleep(delay).await;
-        delay = (delay * 2).min(RECONNECT_MAX);
-    }
-}
-
-async fn run_session<S>(shared: Arc<Shared>, mut connection: Connection<S>) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    let peer = connection.peer();
-    let hello = timeout(HANDSHAKE_TIMEOUT, connection.exchange_hello(shared.hello()))
-        .await
-        .context("Hello exchange timed out")??;
-    let (reader, writer) = connection.into_split();
-    let (outgoing, queue) = mpsc::channel(OUTGOING_QUEUE);
-    let session = shared.next_session.fetch_add(1, Ordering::Relaxed);
-    lock(&shared.peers).insert(
-        peer,
-        PeerHandle {
-            session,
-            outgoing: outgoing.clone(),
-        },
-    );
-    tracing::info!(device = %hello.device_name, id = %peer, "connected");
-
-    let writer_task = tokio::spawn(write_loop(writer, queue));
-    let result = read_loop(&shared, peer, reader, &outgoing).await;
-
-    {
-        let mut peers = lock(&shared.peers);
-        if peers
-            .get(&peer)
-            .is_some_and(|handle| handle.session == session)
-        {
-            peers.remove(&peer);
-        }
-    }
-    drop(outgoing);
-    if timeout(Duration::from_secs(1), writer_task).await.is_err() {
-        tracing::debug!(id = %peer, "writer did not stop in time");
-    }
-    tracing::info!(device = %hello.device_name, id = %peer, "disconnected");
-    result
-}
-
-async fn read_loop<R: AsyncRead + Unpin>(
-    shared: &Shared,
-    peer: DeviceId,
-    mut reader: EnvelopeReader<R>,
-    outgoing: &mpsc::Sender<Outgoing>,
-) -> Result<()> {
-    let mut receiver = ClipReceiver::default();
-    loop {
-        let Some(envelope) = timeout(IDLE_TIMEOUT, reader.recv())
-            .await
-            .context("device went silent")??
-        else {
-            return Ok(());
-        };
-        let received = match envelope.payload {
-            Some(Payload::ClipOffer(offer)) => receiver.on_offer(offer),
-            Some(Payload::ClipChunk(chunk)) => receiver.on_chunk(chunk),
-            Some(Payload::Ping(Ping { nonce })) => {
-                reply(outgoing, Payload::Pong(Pong { nonce })).await?;
-                continue;
-            }
-            Some(Payload::Ack(ack)) => {
-                if ack.status() != AckStatus::Ok {
-                    tracing::warn!(id = %peer, status = ?ack.status(), "device refused a clip");
-                }
-                continue;
-            }
-            Some(Payload::Pong(_)) | None => continue,
-            Some(Payload::Hello(_) | Payload::PairRequest(_) | Payload::PairResponse(_)) => {
-                bail!("device broke the protocol mid-session");
-            }
-        };
-        match received {
-            Received::Pending => {}
-            Received::Rejected { ack } => {
-                tracing::warn!(id = %peer, status = ?ack.status(), "clip from device rejected");
-                reply(outgoing, Payload::Ack(ack)).await?;
-            }
-            Received::Clip { clip, ack } => {
-                reply(outgoing, Payload::Ack(ack)).await?;
-                // A clip that started here and came back through another device: drop it.
-                if !lock(&shared.guard).accepts_origin(&clip.origin) {
-                    continue;
-                }
-                tracing::info!(id = %peer, mime_type = %clip.mime_type, len = clip.data.len(), "clip received");
-                lock(&shared.guard).applied_remote(&clip);
-                shared.clipboard.write(Content {
-                    mime_type: clip.mime_type.clone(),
-                    data: clip.data.clone(),
-                    sensitive: clip.sensitive,
-                })?;
-                shared.broadcast(&clip, Some(peer));
-            }
-        }
-    }
-}
-
-async fn reply(outgoing: &mpsc::Sender<Outgoing>, payload: Payload) -> Result<()> {
-    outgoing
-        .send(Outgoing::Envelope(Envelope {
-            payload: Some(payload),
-        }))
-        .await
-        .map_err(|_| anyhow!("session closed"))
-}
-
-async fn write_loop<W: AsyncWrite + Unpin>(
-    mut writer: EnvelopeWriter<W>,
-    mut queue: mpsc::Receiver<Outgoing>,
-) {
-    let mut ping = interval(PING_INTERVAL);
-    ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    ping.tick().await;
-    let mut nonce = 0u64;
-
-    let result: Result<()> = async {
-        loop {
-            tokio::select! {
-                next = queue.recv() => match next {
-                    Some(Outgoing::Clip(clip)) => {
-                        for envelope in clip::outgoing(&clip)? {
-                            writer.send(&envelope).await?;
-                        }
-                    }
-                    Some(Outgoing::Envelope(envelope)) => writer.send(&envelope).await?,
-                    None => return Ok(()),
-                },
-                _ = ping.tick() => {
-                    nonce = nonce.wrapping_add(1);
-                    writer.send(&Envelope { payload: Some(Payload::Ping(Ping { nonce })) }).await?;
-                }
-            }
-        }
-    }
+    let hello = shared.hello();
+    session::keep_connected(
+        &shared.identity,
+        device.id,
+        &device.addresses,
+        &hello,
+        &shared.peers,
+        &*shared,
+    )
     .await;
-    if let Err(e) = result {
-        tracing::debug!(error = %e, "writer stopped");
-    }
-    let _ = writer.close().await;
 }
 
 /// Sends local clipboard changes to every connected device.
@@ -623,7 +452,7 @@ async fn local_changes_loop(shared: Arc<Shared>, mut changes: mpsc::Receiver<Con
             sensitive: content.sensitive,
             origin: shared.identity.device_id(),
         };
-        let sent_to = shared.broadcast(&clip, None);
+        let sent_to = shared.peers.broadcast(&clip, None);
         tracing::info!(mime_type = %clip.mime_type, len = clip.data.len(), sent_to, "local copy");
     }
 }
@@ -753,7 +582,7 @@ mod tests {
         assert!(wait_for_async(|| connected(&pc.daemon)).await);
 
         let sent_to = pc.daemon.send(Content {
-            mime_type: clip::mime::TEXT.into(),
+            mime_type: pasteget_core::clip::mime::TEXT.into(),
             data: b"sent with pasteget send".to_vec(),
             sensitive: false,
         });
