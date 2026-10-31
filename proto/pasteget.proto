@@ -16,7 +16,25 @@ message Envelope {
     Ack ack = 4;
     Ping ping = 5;
     Pong pong = 6;
+    PairRequest pair_request = 7;
+    PairResponse pair_response = 8;
   }
+}
+
+// First message from a device that is not paired yet. Only valid while the accepting
+// device has a pairing window open.
+message PairRequest {
+  // The one-time secret from the pairing QR code (16 bytes).
+  bytes secret = 1;
+  // Name of the requesting device, shown to the user.
+  string device_name = 2;
+}
+
+// Answer to PairRequest. The connection is closed right after.
+message PairResponse {
+  bool accepted = 1;
+  // Name of the accepting device, shown to the user.
+  string device_name = 2;
 }
 
 // First message each side sends after the TLS handshake.

@@ -6,6 +6,7 @@
 
 pub mod framing;
 pub mod identity;
+pub mod pairing;
 pub mod proto;
 pub mod transport;
 

@@ -20,6 +20,15 @@ impl fmt::Debug for ClipChunk {
     }
 }
 
+/// The pairing secret is never shown.
+impl fmt::Debug for PairRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PairRequest")
+            .field("device_name", &self.device_name)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,5 +64,18 @@ mod tests {
 
         assert!(shown.contains("data_len: 7"));
         assert!(!shown.contains("104")); // b'h'
+    }
+
+    #[test]
+    fn pair_request_debug_hides_the_secret() {
+        let request = PairRequest {
+            secret: vec![0xAB; 16],
+            device_name: "POCO M8 5G".into(),
+        };
+
+        let shown = format!("{request:?}");
+
+        assert!(shown.contains("POCO M8 5G"));
+        assert!(!shown.contains("171")); // 0xAB
     }
 }

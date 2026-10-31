@@ -125,7 +125,56 @@ on the clipboard but must keep it out of history, notifications and OS clipboard
 Either side may send `Ping` at any time; the peer answers with a `Pong` carrying the same
 `nonce`. Used to detect dead connections.
 
-## 5. Pairing *(pending)*
+## 5. Pairing
+
+Pairing makes two devices trust each other's device ID. In version 0 the PC shows a QR code and
+the phone scans it.
+
+### 5.1 The QR code
+
+```
+pasteget://pair?v=0&id=<device ID>&s=<secret>&a=<addresses>&n=<name>
+```
+
+The query uses `application/x-www-form-urlencoded` encoding.
+
+| Key | Value |
+|---|---|
+| `v` | Invite format version: `0` |
+| `id` | Device ID of the PC (52 base32 characters) |
+| `s` | One-time secret: 16 random bytes, unpadded base32 (26 characters) |
+| `a` | Comma-separated socket addresses where the PC listens, e.g. `192.168.1.20:47290,[fe80::1]:47290` |
+| `n` | PC name, for display |
+
+Rules for readers:
+- Reject invites longer than 1024 bytes, with a version other than `0`, with a duplicate key, or
+  missing `id`, `s` or `a`.
+- Ignore unknown keys: they are reserved for later versions.
+- Device names are untrusted: strip control characters, trim, keep at most 64 characters.
+
+### 5.2 Exchange
+
+1. The PC opens a **pairing window**: a fresh secret, valid for **5 minutes**, for **one**
+   successful pairing, and closed after **3 wrong secrets**.
+2. The phone connects to one of the addresses, **pinning the device ID from the QR code**
+   (section 2.3).
+3. The PC sees an unknown client while its window is open. It waits for a `PairRequest`, and
+   anything else closes the connection.
+4. The phone sends `PairRequest { secret, device_name }`.
+5. The PC compares the secret in constant time and answers `PairResponse { accepted,
+   device_name }`. Both sides close the connection.
+6. If accepted, each side stores the other's device ID and name. From then on they connect with
+   ordinary pinned TLS.
+
+### 5.3 Security properties
+
+- **The phone can't be tricked into pairing with another machine**: the QR code carries the PC's
+  device ID, and TLS fails for any other key.
+- **The PC only pairs with a device that saw its screen**: the secret is only in the QR code and
+  only travels inside TLS.
+- **Guessing is useless**: 128-bit secret, 3 attempts, 5 minutes.
+- **Not protected**: someone who photographs the QR code and pairs before the owner does within
+  the 5 minutes. The PC must show which device just paired, and allow revoking it.
 
 ## 6. Echo loops *(pending)*
 

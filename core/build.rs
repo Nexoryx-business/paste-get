@@ -11,8 +11,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let descriptors = protox::compile(["pasteget.proto"], ["../proto"])?;
     prost_build::Config::new()
-        // Implemented by hand in `proto.rs` so clip bytes never reach logs.
-        .skip_debug([".pasteget.v0.ClipChunk"])
+        // Implemented by hand in `proto.rs` so clip bytes and secrets never reach logs.
+        .skip_debug([".pasteget.v0.ClipChunk", ".pasteget.v0.PairRequest"])
         .compile_fds(descriptors)?;
     Ok(())
 }

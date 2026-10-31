@@ -133,7 +133,6 @@ impl<S> UnverifiedConnection<S> {
     }
 
     /// For the pairing handshake only, which authenticates the peer by its one-time secret.
-    #[allow(dead_code)] // Used by the pairing module, next roadmap step.
     pub(crate) fn into_pairing(self) -> Connection<S> {
         self.0
     }
