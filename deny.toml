@@ -6,6 +6,11 @@ all-features = true
 [advisories]
 # Known vulnerabilities and unmaintained crates fail the build.
 yanked = "deny"
+ignore = [
+    # basic-toml is archived (no vulnerability). Only reached through askama, the template engine
+    # uniffi_bindgen uses at build time to generate Kotlin; it never ships in the app or daemon.
+    { id = "RUSTSEC-2026-0374", reason = "build-time only, via uniffi_bindgen/askama" },
+]
 
 [licenses]
 # Licenses compatible with GPL-3.0-or-later. Add new ones only after checking compatibility.
