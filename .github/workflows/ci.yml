@@ -38,6 +38,34 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android,x86_64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install cargo-ndk and the Android SDK packages
+        run: |
+          cargo install cargo-ndk --locked
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.2" "build-tools;36.0.0" "ndk;30.0.16248370" > /dev/null
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, unit tests and lint
+        working-directory: android
+        run: ./gradlew assembleFossDebug testFossDebugUnitTest lintFossDebug
+      - name: Upload the debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: paste-get-android-debug
+          path: android/app/build/outputs/apk/foss/debug/*.apk
+          retention-days: 30
+
   fuzz:
     name: Fuzz smoke test
     runs-on: ubuntu-latest
