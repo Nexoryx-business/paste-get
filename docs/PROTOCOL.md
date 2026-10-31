@@ -186,7 +186,20 @@ Rules for readers:
 - **Not protected**: someone who photographs the QR code and pairs before the owner does within
   the 5 minutes. The PC must show which device just paired, and allow revoking it.
 
-## 6. Echo loops *(pending)*
+## 6. Echo loops
+
+Putting a received clip on the clipboard makes the local clipboard watcher fire. Without care,
+the clip would be sent straight back, forever. Two rules prevent it:
+
+1. **Send only what's new.** Each device remembers a fingerprint of the clipboard's last known
+   content: SHA-256 over the MIME type, a zero byte, and the data. A received clip updates that
+   fingerprint when it's applied. A local change is sent only if its fingerprint differs. This also
+   absorbs operating systems that report one change several times.
+2. **Never accept your own clip.** Offers whose `origin_device` is the receiver's own device ID
+   are ignored (they can come back once devices relay clips to each other).
+
+On Android 13+, clips put on the clipboard from a peer also carry `EXTRA_IS_REMOTE_DEVICE`, so
+the system UI shows them correctly.
 
 ## 7. Compatibility rules
 
