@@ -60,7 +60,7 @@ jobs:
         working-directory: android
         run: ./gradlew assembleFossDebug testFossDebugUnitTest lintFossDebug
       - name: Upload the debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: paste-get-android-debug
           path: android/app/build/outputs/apk/foss/debug/*.apk
