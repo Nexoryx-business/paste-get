@@ -27,7 +27,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 ### M2 — Desktop daemon, headless (`desktop/`)
 - [x] `pasteget daemon`: watch and set the clipboard (text + image) through `arboard`
 - [ ] Verified on Windows 11, KDE Plasma 6 Wayland, Hyprland
-- [ ] mDNS advertising
+- [x] mDNS advertising
 - [x] `pasteget pair` prints a QR code in the terminal (and `pasteget join` for PC-to-PC)
 - [x] `pasteget send <text|file>`, `pasteget status`
 - **Done when:** two daemons (different profiles on one machine) sync clipboards.

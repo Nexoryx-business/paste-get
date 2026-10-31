@@ -54,6 +54,23 @@ ignored, and the certificate may be regenerated at any time without changing the
 
 In version 0, the PC accepts connections and the phone connects.
 
+### 2.4 Discovery
+
+Devices that accept connections announce themselves with mDNS / DNS-SD:
+
+| Field | Value |
+|---|---|
+| Service type | `_pasteget._tcp.local.` |
+| Instance and host label | `paste-get-<first 12 characters of the device ID, lowercase>` |
+| Port | The listening TCP port (default 47290) |
+| TXT `v` | Protocol version: `0` |
+| TXT `id` | Full device ID |
+| TXT `name` | Device name, for display (untrusted, sanitize as in section 5.1) |
+
+Discovery only helps find an address. Trust still comes from the pinned device ID: a forged
+announcement can make a device connect to the wrong address, but the TLS handshake then fails.
+Version 0 announces IPv4 addresses only.
+
 ## 3. Framing
 
 Inside the TLS stream, each message is one frame:

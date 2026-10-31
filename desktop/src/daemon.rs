@@ -33,6 +33,7 @@ use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
 use crate::config::{KnownDevice, KnownDevices, Profile};
+use crate::discovery::Advertiser;
 
 /// Time allowed for the TLS handshake and the Hello exchange.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -56,6 +57,8 @@ pub struct DaemonOptions {
     /// Addresses put in pairing QR codes. `None` uses this machine's network interfaces.
     pub advertised_ips: Option<Vec<IpAddr>>,
     pub poll_interval: Duration,
+    /// Announce the daemon on the local network with mDNS.
+    pub announce: bool,
 }
 
 impl DaemonOptions {
@@ -64,6 +67,7 @@ impl DaemonOptions {
             listen: SocketAddr::from(([0, 0, 0, 0], port)),
             advertised_ips: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
+            announce: true,
         }
     }
 }
@@ -95,6 +99,7 @@ pub struct DeviceStatus {
 pub struct Daemon {
     shared: Arc<Shared>,
     local_addr: SocketAddr,
+    _advertiser: Option<Advertiser>,
 }
 
 struct Shared {
@@ -169,13 +174,34 @@ impl Daemon {
             shared.spawn(dial_loop(Arc::clone(&shared), device));
         }
 
+        // Announcing is a convenience: pairing codes carry addresses anyway.
+        let advertiser = options
+            .announce
+            .then(|| {
+                Advertiser::start(
+                    shared.identity.device_id(),
+                    &shared.device_name,
+                    local_addr.port(),
+                )
+            })
+            .transpose()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "not announcing on the network");
+                None
+            });
+
         tracing::info!(
             device_id = %shared.identity.device_id(),
             name = %shared.device_name,
             address = %local_addr,
+            announced = advertiser.is_some(),
             "daemon started"
         );
-        Ok(Self { shared, local_addr })
+        Ok(Self {
+            shared,
+            local_addr,
+            _advertiser: advertiser,
+        })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -627,6 +653,7 @@ mod tests {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
             advertised_ips: Some(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
             poll_interval: Duration::from_millis(10),
+            announce: false,
         };
         let daemon = Daemon::start(profile, clipboard.clone(), options)
             .await

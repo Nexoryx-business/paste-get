@@ -21,6 +21,7 @@ dirs = "7"
 gethostname = "1"
 if-addrs = "0.15.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+mdns-sd = "0.21"
 pasteget-core = { path = "../core" }
 qrcode = { version = "0.14", default-features = false }
 serde = { version = "1", features = ["derive"] }

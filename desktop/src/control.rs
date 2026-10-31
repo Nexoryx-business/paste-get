@@ -367,6 +367,7 @@ mod tests {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
             advertised_ips: Some(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
             poll_interval: Duration::from_millis(10),
+            announce: false,
         };
         let daemon = Arc::new(
             Daemon::start(profile.clone(), clipboard.clone(), options)
