@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">paste-get</string>
+    <string name="share_label">Send to PC</string>
+    <string name="tile_label">Send clipboard</string>
+    <string name="notification_channel">Connection</string>
+    <string name="notification_connecting">Looking for your computers…</string>
+    <string name="notification_no_computer">No computer paired yet</string>
+    <plurals name="notification_connected">
+        <item quantity="one">Connected to %d computer</item>
+        <item quantity="other">Connected to %d computers</item>
+    </plurals>
+    <plurals name="sent_to">
+        <item quantity="one">Sent to %d computer</item>
+        <item quantity="other">Sent to %d computers</item>
+    </plurals>
+    <string name="nothing_connected">No computer is connected</string>
+    <string name="clipboard_empty">The clipboard is empty</string>
+    <string name="unsupported_content">Only text and images can be sent</string>
+    <string name="send_failed">Could not send: %s</string>
+    <string name="status_no_computer">Pair a computer to get started</string>
+    <string name="pair_button">Pair a computer</string>
+    <string name="send_clipboard_button">Send clipboard now</string>
+    <string name="scan_prompt">Scan the code shown by `pasteget pair` on your computer</string>
+    <string name="not_a_pairing_code">This is not a paste-get pairing code</string>
+    <string name="pairing">Pairing…</string>
+    <string name="paired_with">Paired with %s</string>
+    <string name="paired_computers">Paired computers</string>
+    <string name="connected">Connected</string>
+    <string name="offline">Offline</string>
+    <string name="forget">Forget</string>
+    <string name="this_phone">This phone: %s…</string>
+</resources>

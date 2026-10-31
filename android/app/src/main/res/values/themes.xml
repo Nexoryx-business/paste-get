@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PasteGet" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- For activities that do their work and close without showing anything. -->
+    <style name="Theme.PasteGet.Invisible" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>
