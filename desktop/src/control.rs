@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use data_encoding::BASE64;
 use pasteget_core::pairing::{PAIRING_TTL, PairingInvite};
 use serde::{Deserialize, Serialize};
@@ -120,7 +120,7 @@ pub async fn serve(daemon: Arc<Daemon>, endpoint: &Endpoint) -> Result<JoinHandl
                 .await
                 .is_ok()
             {
-                bail!("a daemon is already running for this profile");
+                anyhow::bail!("a daemon is already running for this profile");
             }
             std::fs::remove_file(&endpoint.path).context("could not remove a stale socket")?;
         }
