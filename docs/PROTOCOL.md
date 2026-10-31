@@ -101,6 +101,16 @@ otherwise it closes the connection. Version 0 implementations close on any misma
 
 Only one clip is in flight per direction at a time: a new `ClipOffer` cancels an unfinished one.
 
+**Limits and checks:**
+- A chunk carries **1 to 262 144 bytes** (256 KiB). Senders use full-size chunks except the last.
+- Receivers choose their maximum clip size (default **64 MiB**) and answer `TOO_LARGE` to bigger
+  offers right away. They must not allocate `size` bytes up front based on the offer alone.
+- `clip_id` is 16 bytes, `sha256` and `origin_device` are 32 bytes; anything else is a
+  `PROTOCOL_ERROR`.
+- When the clip is complete, the receiver checks the hash, then that the content matches its type:
+  valid UTF-8 for text, the PNG signature for images. Failing content is a `PROTOCOL_ERROR`.
+- Any `PROTOCOL_ERROR` discards the clip in flight.
+
 | `Ack.status` | When |
 |---|---|
 | `OK` | Clip complete and hash verified |

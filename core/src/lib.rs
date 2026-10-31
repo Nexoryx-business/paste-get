@@ -4,6 +4,7 @@
 //!
 //! This crate must not contain OS-specific code; desktop and Android apps wrap it.
 
+pub mod clip;
 pub mod framing;
 pub mod identity;
 pub mod pairing;

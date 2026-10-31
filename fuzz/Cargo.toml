@@ -28,3 +28,10 @@ path = "fuzz_targets/pairing_invite.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "clip_receiver"
+path = "fuzz_targets/clip_receiver.rs"
+test = false
+doc = false
+bench = false
