@@ -24,7 +24,7 @@ use pasteget_core::proto::{Hello, PROTOCOL_VERSION, Platform};
 use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, RECONNECT_MIN, SessionEvents};
 use pasteget_core::transport;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 
@@ -429,10 +429,12 @@ async fn handle_incoming(shared: Arc<Shared>, socket: TcpStream) -> Result<()> {
 /// Keeps a connection to a device we joined, redialing with backoff.
 async fn dial_loop(shared: Arc<Shared>, device: KnownDevice) {
     let hello = shared.hello();
+    // The addresses from the pairing code, which never change here.
+    let (_, addresses) = watch::channel(device.addresses.clone());
     session::keep_connected(
         &shared.identity,
         device.id,
-        &device.addresses,
+        addresses,
         &hello,
         &shared.peers,
         &*shared,

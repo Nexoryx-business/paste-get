@@ -69,6 +69,8 @@ Devices that accept connections announce themselves with mDNS / DNS-SD:
 
 Discovery only helps find an address. Trust still comes from the pinned device ID: a forged
 announcement can make a device connect to the wrong address, but the TLS handshake then fails.
+For the same reason, a device remembers an announced address only after a connection through it
+succeeded, so forged announcements can't replace the addresses that work.
 Version 0 announces IPv4 addresses only.
 
 ## 3. Framing

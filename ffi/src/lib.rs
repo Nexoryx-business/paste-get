@@ -6,15 +6,19 @@
 //! session open with each of them (the same `core::session` engine as the desktop), and reports
 //! connections and received clips through [`PhoneListener`].
 //!
+//! The app finds computers on the local network itself (Android's `NsdManager`) and passes what
+//! it finds to [`PhoneClient::computer_found`].
+//!
 //! Methods that touch the network block: call them off the main thread.
 
 // UniFFI's generated scaffolding is `extern "C"` glue that needs `unsafe`. Our own code here
 // uses none.
 #![allow(unsafe_code)]
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -27,6 +31,7 @@ use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, SessionEvents};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 uniffi::setup_scaffolding!();
@@ -34,6 +39,8 @@ uniffi::setup_scaffolding!();
 const IDENTITY_FILE: &str = "identity.key";
 const COMPUTERS_FILE: &str = "computers.json";
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+/// Addresses remembered per computer, and found addresses tried per announcement.
+const MAX_ADDRESSES: usize = 8;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
@@ -63,7 +70,8 @@ impl From<std::io::Error> for PastegetError {
 pub struct PairedComputer {
     pub device_id: String,
     pub name: String,
-    /// Socket addresses from the pairing code, e.g. `192.168.1.20:47290`.
+    /// Socket addresses, e.g. `192.168.1.20:47290`: from the pairing code, then the last one
+    /// that worked moves to the front.
     pub addresses: Vec<String>,
 }
 
@@ -80,7 +88,15 @@ pub trait PhoneListener: Send + Sync {
 pub struct PhoneClient {
     runtime: Runtime,
     state: Arc<State>,
-    sessions: Mutex<Vec<JoinHandle<()>>>,
+    /// One per paired computer while the client runs.
+    dialers: Mutex<HashMap<DeviceId, Dialer>>,
+}
+
+/// Keeps a session with one computer.
+struct Dialer {
+    task: JoinHandle<()>,
+    /// Where it dials. Any update also makes it dial now rather than after its backoff.
+    addresses: watch::Sender<Vec<SocketAddr>>,
 }
 
 struct State {
@@ -119,7 +135,7 @@ impl PhoneClient {
                 peers: Peers::new(),
                 listener: Mutex::new(None),
             }),
-            sessions: Mutex::new(Vec::new()),
+            dialers: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -152,8 +168,8 @@ impl PhoneClient {
             save_computers(&self.state.data_dir, &computers)?;
         }
         // Connect right away if the client is running.
-        if lock(&self.state.listener).is_some() {
-            self.restart_sessions();
+        if self.is_running() {
+            self.start_dialer(&computer);
         }
         Ok(computer)
     }
@@ -169,8 +185,10 @@ impl PhoneClient {
             }
             save_computers(&self.state.data_dir, &computers)?;
         }
-        if lock(&self.state.listener).is_some() {
-            self.restart_sessions();
+        if let Ok(id) = device_id.parse::<DeviceId>()
+            && let Some(dialer) = lock(&self.dialers).remove(&id)
+        {
+            dialer.task.abort();
         }
         Ok(())
     }
@@ -178,15 +196,53 @@ impl PhoneClient {
     /// Connects to every paired computer and keeps reconnecting until [`PhoneClient::stop`].
     pub fn start(&self, listener: Arc<dyn PhoneListener>) {
         *lock(&self.state.listener) = Some(listener);
-        self.restart_sessions();
+        let computers = lock(&self.state.computers).clone();
+        for computer in &computers {
+            self.start_dialer(computer);
+        }
     }
 
     /// Closes every connection.
     pub fn stop(&self) {
-        for session in lock(&self.sessions).drain(..) {
-            session.abort();
+        for (_, dialer) in lock(&self.dialers).drain() {
+            dialer.task.abort();
         }
         *lock(&self.state.listener) = None;
+    }
+
+    /// The computer `device_id` was found on the local network at `ips` and `port`. If it isn't
+    /// connected, it's dialed there right away. Returns `false` if it isn't a paired computer.
+    ///
+    /// Found addresses are only tried: one is remembered once a connection through it proved
+    /// the computer's identity, so a forged announcement can't push the real addresses out.
+    pub fn computer_found(&self, device_id: String, ips: Vec<String>, port: u16) -> bool {
+        let Ok(id) = device_id.parse::<DeviceId>() else {
+            return false;
+        };
+        let Some(known) = lock(&self.state.computers)
+            .iter()
+            .find(|c| c.device_id == device_id)
+            .map(|c| parse_addresses(&c.addresses))
+        else {
+            return false;
+        };
+        let found = ips
+            .iter()
+            .filter_map(|ip| ip.parse::<IpAddr>().ok())
+            .map(|ip| SocketAddr::new(ip, port))
+            .take(MAX_ADDRESSES);
+        if let Some(dialer) = lock(&self.dialers).get(&id) {
+            dialer.addresses.send_replace(found_first(found, known));
+        }
+        true
+    }
+
+    /// The phone joined a network: computers that aren't connected are dialed right away
+    /// instead of after their reconnection wait.
+    pub fn network_changed(&self) {
+        for dialer in lock(&self.dialers).values() {
+            dialer.addresses.send_modify(|_| {});
+        }
     }
 
     pub fn connected_count(&self) -> u32 {
@@ -220,34 +276,24 @@ impl PhoneClient {
         u32::try_from(self.state.peers.broadcast(&clip, None)).unwrap_or(u32::MAX)
     }
 
-    fn restart_sessions(&self) {
-        let mut sessions = lock(&self.sessions);
-        for session in sessions.drain(..) {
-            session.abort();
-        }
-        let hello = self.state.hello();
-        for computer in lock(&self.state.computers).iter() {
-            let Ok(id) = computer.device_id.parse::<DeviceId>() else {
-                continue;
-            };
-            let addresses: Vec<SocketAddr> = computer
-                .addresses
-                .iter()
-                .filter_map(|a| a.parse().ok())
-                .collect();
-            let state = Arc::clone(&self.state);
-            let hello = hello.clone();
-            sessions.push(self.runtime.spawn(async move {
-                session::keep_connected(
-                    &state.identity,
-                    id,
-                    &addresses,
-                    &hello,
-                    &state.peers,
-                    &*state,
-                )
+    fn is_running(&self) -> bool {
+        lock(&self.state.listener).is_some()
+    }
+
+    /// Starts keeping a session with `computer`, replacing any earlier dialer for it.
+    fn start_dialer(&self, computer: &PairedComputer) {
+        let Ok(id) = computer.device_id.parse::<DeviceId>() else {
+            return;
+        };
+        let (addresses, watched) = watch::channel(parse_addresses(&computer.addresses));
+        let state = Arc::clone(&self.state);
+        let task = self.runtime.spawn(async move {
+            let hello = state.hello();
+            session::keep_connected(&state.identity, id, watched, &hello, &state.peers, &*state)
                 .await;
-            }));
+        });
+        if let Some(old) = lock(&self.dialers).insert(id, Dialer { task, addresses }) {
+            old.task.abort();
         }
     }
 }
@@ -274,6 +320,24 @@ impl State {
 }
 
 impl SessionEvents for State {
+    /// Moves the address that worked to the front, so it's dialed first next time.
+    fn reached(&self, peer: DeviceId, address: SocketAddr) {
+        let id = peer.to_string();
+        let address = address.to_string();
+        let mut computers = lock(&self.computers);
+        let Some(computer) = computers.iter_mut().find(|c| c.device_id == id) else {
+            return;
+        };
+        if computer.addresses.first() == Some(&address) {
+            return;
+        }
+        computer.addresses.retain(|a| *a != address);
+        computer.addresses.insert(0, address);
+        computer.addresses.truncate(MAX_ADDRESSES);
+        // Best effort: if saving fails, the next connection tries again.
+        let _ = save_computers(&self.data_dir, &computers);
+    }
+
     fn connected(&self, peer: DeviceId, _hello: &Hello) {
         if let Some(listener) = self.listener() {
             listener.on_connection_changed(peer.to_string(), true);
@@ -323,6 +387,24 @@ async fn pair_with_any_address(
     Err(last_error)
 }
 
+fn parse_addresses(addresses: &[String]) -> Vec<SocketAddr> {
+    addresses.iter().filter_map(|a| a.parse().ok()).collect()
+}
+
+/// `first`, then the addresses of `then` that aren't in it.
+fn found_first(
+    first: impl IntoIterator<Item = SocketAddr>,
+    then: impl IntoIterator<Item = SocketAddr>,
+) -> Vec<SocketAddr> {
+    let mut merged: Vec<SocketAddr> = Vec::new();
+    for address in first.into_iter().chain(then) {
+        if !merged.contains(&address) {
+            merged.push(address);
+        }
+    }
+    merged
+}
+
 fn load_or_create_identity(dir: &Path) -> Result<Identity, PastegetError> {
     let path = dir.join(IDENTITY_FILE);
     match fs::read(&path) {
@@ -368,4 +450,34 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), PastegetError> {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn addr(s: &str) -> SocketAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn found_addresses_come_first_without_duplicates() {
+        let found = [addr("192.168.1.30:47290"), addr("10.0.0.2:47290")];
+        let known = [addr("192.168.1.20:47290"), addr("10.0.0.2:47290")];
+
+        assert_eq!(
+            found_first(found, known),
+            [
+                addr("192.168.1.30:47290"),
+                addr("10.0.0.2:47290"),
+                addr("192.168.1.20:47290")
+            ]
+        );
+    }
+
+    #[test]
+    fn unparsable_addresses_are_skipped() {
+        let stored = ["192.168.1.20:47290".to_owned(), "not an address".to_owned()];
+        assert_eq!(parse_addresses(&stored), [addr("192.168.1.20:47290")]);
+    }
 }

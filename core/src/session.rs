@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
+use tokio::sync::{mpsc, watch};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until, timeout};
 
 use crate::clip::{self, Clip, ClipReceiver, Received};
 use crate::identity::{DeviceId, Identity};
@@ -53,8 +53,14 @@ pub enum SessionError {
 
 /// What a session reports to the app. Called from session tasks: keep it quick.
 pub trait SessionEvents: Send + Sync {
+    /// [`keep_connected`] reached `peer` at `address`: the TLS handshake proved its identity.
+    /// The place to remember a working address.
+    fn reached(&self, _peer: DeviceId, _address: SocketAddr) {}
+
     fn connected(&self, _peer: DeviceId, _hello: &Hello) {}
 
+    /// The device is no longer connected, also after a cancelled session. Not reported when a
+    /// newer session with the same device already replaced this one.
     fn disconnected(&self, _peer: DeviceId) {}
 
     /// A complete clip whose hash and type were verified.
@@ -116,11 +122,14 @@ impl Peers {
         session
     }
 
-    fn unregister(&self, peer: DeviceId, session: u64) {
+    /// Forgets `session`. Returns `false` if a newer session with the device replaced it.
+    fn unregister(&self, peer: DeviceId, session: u64) -> bool {
         let mut queues = self.lock();
-        if queues.get(&peer).is_some_and(|q| q.session == session) {
+        let current = queues.get(&peer).is_some_and(|q| q.session == session);
+        if current {
             queues.remove(&peer);
         }
+        current
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<DeviceId, PeerQueue>> {
@@ -147,8 +156,10 @@ where
     let (sender, queue) = mpsc::channel(OUTGOING_QUEUE);
     let mut guard = SessionGuard {
         peers,
+        events,
         peer,
         session: peers.register(peer, sender.clone()),
+        was_current: None,
         writer: Some(tokio::spawn(write_loop(writer, queue))),
     };
     events.connected(peer, &their_hello);
@@ -156,7 +167,7 @@ where
     let result = read_loop(peer, reader, &sender, events).await;
 
     // Graceful end: once no queue sender is left, the writer flushes and closes the connection.
-    peers.unregister(peer, guard.session);
+    guard.unregister();
     drop(sender);
     if let Some(mut writer) = guard.writer.take()
         && timeout(Duration::from_secs(1), &mut writer).await.is_err()
@@ -164,41 +175,61 @@ where
         tracing::debug!(%peer, "writer did not stop in time");
         writer.abort();
     }
-    events.disconnected(peer);
     result
 }
 
-/// Tears a session down even if `run_session` is cancelled: forgets the device and stops the
-/// writer task, which would otherwise keep the connection alive with its pings.
+/// Tears a session down even if `run_session` is cancelled: forgets the device, stops the
+/// writer task (which would otherwise keep the connection alive with its pings) and reports the
+/// disconnection.
 struct SessionGuard<'a> {
     peers: &'a Peers,
+    events: &'a dyn SessionEvents,
     peer: DeviceId,
     session: u64,
+    /// Set once unregistered: whether this was still the device's current session.
+    was_current: Option<bool>,
     writer: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl Drop for SessionGuard<'_> {
-    fn drop(&mut self) {
-        self.peers.unregister(self.peer, self.session);
-        if let Some(writer) = self.writer.take() {
-            writer.abort();
+impl SessionGuard<'_> {
+    fn unregister(&mut self) {
+        if self.was_current.is_none() {
+            self.was_current = Some(self.peers.unregister(self.peer, self.session));
         }
     }
 }
 
-/// Keeps a connection to `peer` open forever: dials `addresses` in turn, runs a session, and
+impl Drop for SessionGuard<'_> {
+    fn drop(&mut self) {
+        self.unregister();
+        if let Some(writer) = self.writer.take() {
+            writer.abort();
+        }
+        if self.was_current == Some(true) {
+            self.events.disconnected(self.peer);
+        }
+    }
+}
+
+/// Keeps a connection to `peer` open forever: dials its addresses in turn, runs a session, and
 /// redials with backoff when it ends. Cancel by dropping or aborting the task.
+///
+/// `addresses` may change while it runs, for example when the device is found at a new address.
+/// Every update, even one with the same addresses, also cuts short the wait before the next
+/// attempt: it's the hint that the device or the network just came back.
 pub async fn keep_connected(
     identity: &Identity,
     peer: DeviceId,
-    addresses: &[SocketAddr],
+    mut addresses: watch::Receiver<Vec<SocketAddr>>,
     hello: &Hello,
     peers: &Peers,
     events: &dyn SessionEvents,
 ) {
     let mut delay = RECONNECT_MIN;
     loop {
-        for address in addresses {
+        let round = Instant::now();
+        let current = addresses.borrow_and_update().clone();
+        for address in current {
             let connected = timeout(HANDSHAKE_TIMEOUT, async {
                 let socket = TcpStream::connect(address)
                     .await
@@ -209,6 +240,7 @@ pub async fn keep_connected(
             match connected {
                 Ok(Ok(connection)) => {
                     delay = RECONNECT_MIN;
+                    events.reached(peer, address);
                     if let Err(e) = run_session(connection, hello.clone(), peers, events).await {
                         tracing::info!(%peer, error = %e, "session ended");
                     }
@@ -218,8 +250,15 @@ pub async fn keep_connected(
                 Err(_) => tracing::debug!(%peer, %address, "dial timed out"),
             }
         }
-        sleep(delay).await;
-        delay = (delay * 2).min(RECONNECT_MAX);
+        tokio::select! {
+            () = sleep(delay) => delay = (delay * 2).min(RECONNECT_MAX),
+            // A closed channel disables this branch: then only the backoff applies.
+            Ok(()) = addresses.changed() => {
+                // At most one round per RECONNECT_MIN, however often hints arrive.
+                sleep_until(round + RECONNECT_MIN).await;
+                delay = RECONNECT_MIN;
+            }
+        }
     }
 }
 
@@ -322,13 +361,16 @@ async fn write_loop<W: AsyncWrite + Unpin>(
 mod tests {
     use super::*;
     use crate::proto::{PROTOCOL_VERSION, Platform};
+    use std::net::Ipv4Addr;
     use std::sync::Arc;
     use tokio::io::duplex;
+    use tokio::net::TcpListener;
 
     #[derive(Default)]
     struct Recorder {
         clips: Mutex<Vec<(DeviceId, Clip)>>,
         connected: Mutex<Vec<String>>,
+        disconnected: Mutex<Vec<DeviceId>>,
     }
 
     impl SessionEvents for Recorder {
@@ -337,6 +379,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(hello.device_name.clone());
+        }
+
+        fn disconnected(&self, peer: DeviceId) {
+            self.disconnected.lock().unwrap().push(peer);
         }
 
         fn clip_received(&self, peer: DeviceId, clip: Clip) {
@@ -420,14 +466,15 @@ mod tests {
             async { transport::accept(pc_io, &pc).await?.authorize(|_| true) }
         );
         let (phone_peers, pc_peers) = (Arc::new(Peers::new()), Arc::new(Peers::new()));
-        let events = Arc::new(Recorder::default());
+        let (phone_events, pc_events) =
+            (Arc::new(Recorder::default()), Arc::new(Recorder::default()));
 
         let phone_session = tokio::spawn({
-            let (peers, events) = (Arc::clone(&phone_peers), Arc::clone(&events));
+            let (peers, events) = (Arc::clone(&phone_peers), Arc::clone(&phone_events));
             async move { run_session(client.unwrap(), hello("phone"), &peers, &*events).await }
         });
         let pc_session = tokio::spawn({
-            let (peers, events) = (Arc::clone(&pc_peers), Arc::clone(&events));
+            let (peers, events) = (Arc::clone(&pc_peers), Arc::clone(&pc_events));
             async move { run_session(server.unwrap(), hello("pc"), &peers, &*events).await }
         });
         until(|| pc_peers.is_connected(&phone.device_id())).await;
@@ -437,6 +484,38 @@ mod tests {
         assert!(timeout(Duration::from_secs(5), pc_session).await.is_ok());
         assert!(phone_peers.connected().is_empty());
         assert!(pc_peers.connected().is_empty());
+        // Both sides report it, the cancelled one included.
+        until(|| !phone_events.disconnected.lock().unwrap().is_empty()).await;
+        assert_eq!(*phone_events.disconnected.lock().unwrap(), [pc.device_id()]);
+        assert_eq!(*pc_events.disconnected.lock().unwrap(), [phone.device_id()]);
+    }
+
+    #[tokio::test]
+    async fn new_addresses_cut_the_reconnect_wait() {
+        let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let (addresses, watched) = watch::channel(Vec::new());
+        let dialer = tokio::spawn(async move {
+            let (peers, events) = (Peers::new(), Recorder::default());
+            keep_connected(
+                &phone,
+                pc.device_id(),
+                watched,
+                &hello("phone"),
+                &peers,
+                &events,
+            )
+            .await;
+        });
+
+        // With no address to dial, the waits grow: 1 s, 2 s, then 4 s from t = 3 s.
+        sleep(Duration::from_millis(3500)).await;
+        addresses.send_replace(vec![listener.local_addr().unwrap()]);
+
+        // Without the update, the next attempt would come at t = 7 s, and to no address.
+        let dialed = timeout(Duration::from_secs(2), listener.accept()).await;
+        dialer.abort();
+        assert!(dialed.is_ok(), "the new address was not dialed in time");
     }
 
     #[tokio::test]
@@ -462,9 +541,11 @@ mod tests {
         let (new, _b) = mpsc::channel(1);
 
         let old_session = peers.register(id, old);
-        peers.register(id, new);
-        peers.unregister(id, old_session);
+        let new_session = peers.register(id, new);
 
+        assert!(!peers.unregister(id, old_session));
         assert!(peers.is_connected(&id));
+        assert!(peers.unregister(id, new_session));
+        assert!(!peers.is_connected(&id));
     }
 }

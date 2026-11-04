@@ -10,7 +10,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -20,17 +24,41 @@ import uniffi.pasteget_ffi.PhoneListener
  * Keeps the connections to the paired computers alive while the app is in the background.
  *
  * A `connectedDevice` foreground service: unlike `dataSync`, Android 15 doesn't cap its running
- * time. Its notification shows how many computers are connected.
+ * time. Its notification shows how many computers are connected. While one of them isn't, it
+ * looks for it on the local network.
  */
 class SyncService : Service() {
+    private val main = Handler(Looper.getMainLooper())
+    private lateinit var finder: ComputerFinder
+
+    /** Callbacks from the client's threads may still arrive after onDestroy. */
+    private var running = false
+
     private val listener = object : PhoneListener {
         override fun onConnectionChanged(deviceId: String, connected: Boolean) {
             pasteGet.setConnected(deviceId, connected)
-            updateNotification()
+            main.post {
+                if (running) {
+                    updateNotification()
+                    updateFinder()
+                }
+            }
         }
 
         override fun onClipReceived(mimeType: String, data: ByteArray, sensitive: Boolean) {
             ReceivedClips.apply(applicationContext, mimeType, data, sensitive)
+        }
+    }
+
+    /** On a new network, computers are dialed right away instead of after their backoff. */
+    private val network = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            main.post {
+                if (running) {
+                    pasteGet.client.networkChanged()
+                    finder.restart()
+                }
+            }
         }
     }
 
@@ -43,12 +71,23 @@ class SyncService : Service() {
             notification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
         )
+        finder = ComputerFinder(this, pasteGet.client)
+        running = true
         pasteGet.client.start(listener)
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    /** Also called again by the app after pairing, so a new computer is looked for. */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        updateFinder()
+        return START_STICKY
+    }
 
     override fun onDestroy() {
+        running = false
+        getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network)
+        finder.setActive(false)
+        main.removeCallbacksAndMessages(null)
         pasteGet.client.stop()
         pasteGet.clearConnected()
         super.onDestroy()
@@ -78,6 +117,12 @@ class SyncService : Service() {
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    /** Searches the network only while a paired computer is missing. */
+    private fun updateFinder() {
+        val connected = pasteGet.connected.value
+        finder.setActive(pasteGet.client.pairedComputers().any { it.deviceId !in connected })
     }
 
     private fun updateNotification() {

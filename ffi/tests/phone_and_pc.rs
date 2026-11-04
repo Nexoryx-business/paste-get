@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pasteget_core::clip::mime;
+use pasteget_core::identity::Identity;
 use pasteget_desktop::clipboard::{Content, MemoryClipboard, Raw, RgbaImage};
 use pasteget_desktop::config::Profile;
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
@@ -57,8 +58,11 @@ struct Pc {
 }
 
 fn start_pc() -> Pc {
+    start_pc_in(tempfile::tempdir().unwrap())
+}
+
+fn start_pc_in(home: tempfile::TempDir) -> Pc {
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let home = tempfile::tempdir().unwrap();
     let profile = Profile::open_in(home.path(), "pc").unwrap();
     let clipboard = MemoryClipboard::default();
     let options = DaemonOptions {
@@ -76,6 +80,19 @@ fn start_pc() -> Pc {
         clipboard,
         _home: home,
     }
+}
+
+/// Stops the daemon and starts it again from the same profile, on a new port.
+fn restart(pc: Pc) -> Pc {
+    let Pc {
+        runtime,
+        daemon,
+        _home: home,
+        ..
+    } = pc;
+    drop(daemon);
+    drop(runtime);
+    start_pc_in(home)
 }
 
 fn path_of(dir: &tempfile::TempDir) -> String {
@@ -172,6 +189,44 @@ fn forgetting_a_computer_disconnects_it() {
         phone.forget(computer.device_id),
         Err(PastegetError::UnknownDevice)
     ));
+}
+
+#[test]
+fn a_computer_found_at_a_new_address_is_reconnected() {
+    let pc = start_pc();
+    let qr_code = pc
+        .runtime
+        .block_on(pc.daemon.open_pairing())
+        .unwrap()
+        .to_uri();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let phone = PhoneClient::new(path_of(&phone_dir), "POCO".into()).unwrap();
+    let computer = phone.pair(qr_code).unwrap();
+    phone.start(Arc::new(Recorder::default()));
+    wait_until("the connection", || phone.connected_count() == 1);
+    let old_address = pc.daemon.local_addr();
+
+    // The PC comes back somewhere else, as after its IP address changed.
+    let pc = restart(pc);
+    let new_address = pc.daemon.local_addr();
+    assert_ne!(new_address, old_address);
+    wait_until("the phone to notice", || phone.connected_count() == 0);
+
+    // Discovery finds it there: the phone dials it right away.
+    assert!(phone.computer_found(
+        computer.device_id.clone(),
+        vec!["127.0.0.1".into(), "not an IP".into()],
+        new_address.port(),
+    ));
+    wait_until("the reconnection", || phone.connected_count() == 1);
+
+    // The address that worked is remembered, first, for the next start.
+    assert_eq!(
+        phone.paired_computers()[0].addresses,
+        [new_address.to_string(), old_address.to_string()]
+    );
+    let stranger = Identity::generate().unwrap().device_id().to_string();
+    assert!(!phone.computer_found(stranger, vec!["127.0.0.1".into()], 1));
 }
 
 #[test]
