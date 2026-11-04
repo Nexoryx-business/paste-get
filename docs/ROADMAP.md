@@ -96,6 +96,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [ ] README demo GIF: needs the real devices; how to record it is in `RELEASING.md`
 - [ ] Human review of crypto and protocol code: `docs/REVIEW.md` lists the files and the
   22 properties to check
+- [x] Pairing from the tray: a *Pair a phone* window with the QR code, opened by itself on the
+  first start, so no terminal is needed
 - [ ] PC side can revoke a paired phone (`SECURITY.md`, known gaps), before 0.1 is announced
 
 ## v0.2 — "smart"

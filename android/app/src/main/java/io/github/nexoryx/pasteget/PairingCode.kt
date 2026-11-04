@@ -2,7 +2,7 @@
 
 package io.github.nexoryx.pasteget
 
-/** Pairing codes shown as QR codes by `pasteget pair`. The Rust core does the real parsing. */
+/** Pairing codes shown as QR codes by the computer. The Rust core does the real parsing. */
 object PairingCode {
     private const val PREFIX = "pasteget://pair?"
 

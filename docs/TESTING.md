@@ -272,6 +272,11 @@ Where the icon shows up:
 - **Hyprland:** only in a bar with a tray, such as Waybar's `tray` module. Without one, the app
   runs but shows nothing.
 
+Pairing needs no terminal: the first time `pasteget-tray` starts with nothing paired, it opens a
+**Pair a phone** window with the QR code. Later, the menu's *Pair a phone…* opens it again. When
+the phone has scanned it, the window says "Paired with …" and closes by itself. `pasteget pair`
+still works too.
+
 Stop any `pasteget daemon` first, then start `pasteget-tray` (from a terminal the first time, to
 see its log). Keep the fake phone of section 2 running.
 
@@ -286,6 +291,9 @@ see its log). Keep the fake phone of section 2 running.
 | T7 | Stop the fake phone (Ctrl+C) | Within a few seconds its line turns ○ and the menu says "No device connected" |
 | T8 | *Quit* | The icon disappears; `pasteget status` says the daemon is not running |
 | T9 | Start `pasteget daemon` in a terminal, then `pasteget-tray` | The tray shows that daemon. *Quit* closes the tray only: the daemon keeps running |
+| T10 | With a new profile (`pasteget-tray --profile fresh`), start the tray | The *Pair a phone* window opens by itself with a QR code |
+| T11 | Phone: **Pair a computer**, scan that code | The window shows ✓ "Paired with <phone>" and closes after a few seconds; the tray keeps running and lists the phone as ● |
+| T12 | Menu → *Pair a phone…*, then close the window with its × | The tray keeps running (closing the window doesn't quit) |
 
 Report which rows passed on Windows 11, KDE Plasma and Hyprland, and anything that looks wrong
 in the menu (cut-off text, missing ticks, a menu that closes by itself).

@@ -156,7 +156,7 @@ async fn daemon(
         status.listening_on.port()
     );
     if status.devices.is_empty() {
-        println!("No device paired yet: run `pasteget pair` in another terminal.");
+        println!("No device paired yet: run `pasteget pair` in another terminal, or use the tray.");
     }
     println!("Press Ctrl+C to stop.");
 

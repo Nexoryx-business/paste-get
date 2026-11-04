@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 pasteget-desktop = { path = ".." }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+serde_json = "1"
 # No window, no webview content: only the tray icon and its menu.
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tokio = { version = "1", features = ["time"] }

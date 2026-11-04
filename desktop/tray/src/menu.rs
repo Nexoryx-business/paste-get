@@ -6,6 +6,7 @@
 use pasteget_desktop::control::{RecentReply, StatusReply};
 use pasteget_desktop::recent;
 
+pub const PAIR: &str = "pair";
 pub const PAUSE: &str = "pause";
 pub const START_AT_LOGIN: &str = "start-at-login";
 pub const QUIT: &str = "quit";
@@ -73,6 +74,7 @@ pub enum Entry {
 /// What a click asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
+    Pair,
     TogglePause,
     ToggleStartAtLogin,
     CopyRecent(u64),
@@ -82,6 +84,7 @@ pub enum Command {
 impl Command {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
+            PAIR => Some(Self::Pair),
             PAUSE => Some(Self::TogglePause),
             START_AT_LOGIN => Some(Self::ToggleStartAtLogin),
             QUIT => Some(Self::Quit),
@@ -125,7 +128,7 @@ fn daemon_entries(state: &State) -> Vec<Entry> {
                 Entry::Separator,
             ];
             if status.devices.is_empty() {
-                entries.push(Entry::Info("No paired device: run “pasteget pair”".into()));
+                entries.push(Entry::Info("No paired device yet".into()));
             } else {
                 entries.push(Entry::Info("Devices".into()));
                 entries.extend(status.devices.iter().map(|device| {
@@ -133,6 +136,10 @@ fn daemon_entries(state: &State) -> Vec<Entry> {
                     Entry::Info(format!("{dot}  {}", text(&device.name)))
                 }));
             }
+            entries.push(Entry::Action {
+                id: PAIR.into(),
+                label: "Pair a phone…".into(),
+            });
             entries.push(Entry::Separator);
             entries.push(Entry::Submenu {
                 label: "Recent".into(),
@@ -245,6 +252,7 @@ mod tests {
                 "Devices",
                 "●  POCO M8 5G",
                 "○  Laptop",
+                "Pair a phone…",
                 "---",
                 "Recent > Text: hello world · POCO M8 5G, 2 min | Image (JPEG, 1.2 MB) · this computer, 2 min",
                 "[ ] Pause syncing",
@@ -273,11 +281,9 @@ mod tests {
         };
         assert!(!alone.paused());
         assert_eq!(alone.summary(), "No device connected");
-        assert!(
-            labels(&entries(&alone, None))
-                .iter()
-                .any(|l| l.contains("pasteget pair"))
-        );
+        let shown = labels(&entries(&alone, None));
+        assert!(shown.contains(&"No paired device yet".to_owned()));
+        assert!(shown.contains(&"Pair a phone…".to_owned()));
     }
 
     #[test]
@@ -301,6 +307,7 @@ mod tests {
     fn clicks_map_back_to_commands() {
         assert_eq!(Command::from_id(PAUSE), Some(Command::TogglePause));
         assert_eq!(Command::from_id(QUIT), Some(Command::Quit));
+        assert_eq!(Command::from_id(PAIR), Some(Command::Pair));
         assert_eq!(
             Command::from_id(START_AT_LOGIN),
             Some(Command::ToggleStartAtLogin)

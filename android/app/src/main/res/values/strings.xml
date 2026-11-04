@@ -21,7 +21,7 @@
     <string name="status_no_computer">Pair a computer to get started</string>
     <string name="pair_button">Pair a computer</string>
     <string name="send_clipboard_button">Send clipboard now</string>
-    <string name="scan_prompt">Scan the code shown by `pasteget pair` on your computer</string>
+    <string name="scan_prompt">Scan the code shown by paste-get on your computer</string>
     <string name="not_a_pairing_code">This is not a paste-get pairing code</string>
     <string name="pairing">Pairing…</string>
     <string name="paired_with">Paired with %s</string>

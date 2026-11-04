@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod menu;
+mod pairing;
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +29,7 @@ use pasteget_desktop::notify::DesktopNotifier;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, RunEvent, Runtime};
+use tauri::{AppHandle, Manager, RunEvent, Runtime};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -66,6 +67,8 @@ struct Tray {
     /// Rebuild the menu even if nothing changed: a click ticks a checkbox by itself, even when
     /// the action behind it fails.
     redraw: AtomicBool,
+    /// The pairing window's task. A new one replaces it.
+    pairing: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 struct Hosted {
@@ -105,6 +108,7 @@ fn run(cli: &Cli) -> Result<()> {
         autostart,
         refresh: Notify::new(),
         redraw: AtomicBool::new(false),
+        pairing: Mutex::new(None),
     });
 
     let for_setup = Arc::clone(&tray);
@@ -118,10 +122,14 @@ fn run(cli: &Cli) -> Result<()> {
         })
         .build(tauri::generate_context!())
         .context("could not start the tray")?;
-    app.run(move |_, event| {
-        if let RunEvent::Exit = event {
-            tray.stop_hosted();
-        }
+    app.run(move |_, event| match event {
+        // Closing the pairing window, the only window, would end the app: only Quit does.
+        // (Quit asks with an exit code; closing the last window asks without one.)
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => api.prevent_exit(),
+        RunEvent::Exit => tray.stop_hosted(),
+        _ => {}
     });
     Ok(())
 }
@@ -153,6 +161,10 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
             app.exit(0);
             return;
         }
+        Command::Pair => {
+            open_pairing(app, tray);
+            return;
+        }
         Command::ToggleStartAtLogin => {
             if let Err(e) = tray.toggle_start_at_login() {
                 tracing::warn!(error = %format!("{e:#}"), "could not change starting at login");
@@ -174,10 +186,41 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
     });
 }
 
+/// Opens the pairing window, or brings it to the front.
+fn open_pairing<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>) {
+    let mut slot = tray.pairing.lock().unwrap_or_else(PoisonError::into_inner);
+    let window_open = app.get_webview_window(pairing::WINDOW).is_some();
+    if let Some(task) = slot.take() {
+        if window_open {
+            // Still pairing: just show it again.
+            *slot = Some(task);
+            drop(slot);
+            if let Some(window) = app.get_webview_window(pairing::WINDOW) {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            return;
+        }
+        // Closed earlier: start over with a fresh code.
+        task.abort();
+    }
+    let app = app.clone();
+    let tray = Arc::clone(tray);
+    let endpoint = tray.endpoint.clone();
+    *slot = Some(tauri::async_runtime::spawn(async move {
+        if let Err(e) = pairing::run(app, endpoint).await {
+            tracing::warn!(error = %format!("{e:#}"), "pairing window failed");
+        }
+        tray.refresh.notify_one();
+    }));
+}
+
 /// Keeps the menu and icon in step with the daemon, and starts the daemon when none runs.
 async fn refresh_loop<R: Runtime>(app: AppHandle<R>, tray: Arc<Tray>) {
     let mut shown: Option<(Vec<Entry>, bool)> = None;
     let mut next_start = Instant::now();
+    // The first time paste-get runs, nothing is paired yet: show the code right away.
+    let mut offered_pairing = false;
     loop {
         let mut state = fetch(&tray.endpoint).await;
         if matches!(state, State::Down(_)) && !tray.is_hosting() && Instant::now() >= next_start {
@@ -188,6 +231,13 @@ async fn refresh_loop<R: Runtime>(app: AppHandle<R>, tray: Arc<Tray>) {
                     state = State::Down(format!("{e:#}"));
                     next_start = Instant::now() + RESTART_EVERY;
                 }
+            }
+        }
+
+        if !offered_pairing && let State::Running { status, .. } = &state {
+            offered_pairing = true;
+            if status.devices.is_empty() {
+                open_pairing(&app, &tray);
             }
         }
 
