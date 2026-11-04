@@ -2,7 +2,8 @@
 
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
-section 6 automatic screenshots, section 7 the way back, from the PC to the phone.
+section 6 automatic screenshots, section 7 the way back, from the PC to the phone, and section 8
+the automatic copy on the phone.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -96,7 +97,7 @@ failures, attach the output of terminals 1 and 2 and of `pasteget status`.
 
 What the Android app does so far: pair by QR code, then send text or images **by hand** (share
 sheet, Quick Settings tile, or the button in the app). Text sent from the PC lands on the phone
-clipboard. Automatic sync of every copy comes with Shizuku (M5).
+clipboard. Sections 6 to 8 add screenshots, the way back from the PC, and the automatic copy.
 
 ### Install the app
 
@@ -190,6 +191,56 @@ go: the log then also says "clip saved as clip-….png for the clipboard".
 Report which rows passed with the PC on Windows, KDE Plasma and Hyprland, and in which phone apps
 C4 worked.
 
+## 8. Copy on the phone, paste on the PC (M5)
+
+Android lets only the app in front read the clipboard. paste-get reads it in two ways, shown on
+the home screen under **Send what you copy**:
+
+- **Mode A, Shizuku.** [Shizuku](https://shizuku.rikka.app/) runs a small part of paste-get as the
+  shell user, which may read the clipboard in the background. Shizuku has to be started again
+  after each restart of the phone (without root).
+- **Mode B, the fallback**, while Shizuku isn't running. When the clipboard changes, Android writes
+  a line in the system log; paste-get then shows an invisible window for a moment to read it.
+  It needs two permissions that Shizuku grants once. Taking focus may close the keyboard.
+  On Android 13 and later, Android also asks to allow log access each time paste-get starts.
+
+Only text is sent automatically. Images and files: share them with **Send to PC**.
+
+### Set up Shizuku
+
+Follow [`devices/xiaomi-hyperos.md`](devices/xiaomi-hyperos.md), sections 1 and 2 (Developer
+options, then Shizuku through Wireless debugging). Then in paste-get, turn on **Send what you
+copy** and tap **Allow in Shizuku**.
+
+No Shizuku? Mode B also works with two grants by hand, once: `adb shell pm grant
+io.github.nexoryx.pasteget android.permission.READ_LOGS`, then allow **Display over other apps** for
+paste-get in the phone's settings.
+
+### Checklist
+
+Watch the PC daemon's terminal, and on the phone `adb logcat -s paste-get` if you can.
+
+| # | Do this | Expected |
+|---|---|---|
+| A1 | Turn on **Send what you copy**, allow paste-get in Shizuku | The card says "Mode: Shizuku, as shell" |
+| A2 | In any app (Chrome, Notes…), select text → **Copy**. On the PC, `Ctrl+V` | The text is pasted. The card says "Last copy (…) sent at …" |
+| A3 | Copy the same text again | The PC logs nothing new (the phone logs "seen before, not sent") |
+| A4 | Copy text **on the PC**, paste it on the phone, wait 5 s | The PC does not receive it back from the phone |
+| A5 | During A2: does the phone show a notice like "Shell pasted from your clipboard"? | Report what it says (Android 12+ may show one; Settings → Privacy → "Show clipboard access" turns it off) |
+| A6 | Copy a password from a password manager (Bitwarden, KeePassDX…), paste it on the PC | Pasted, and absent from Windows' clipboard history (`Win+V`) or Klipper |
+| B1 | With Shizuku running, tap **Grant them (paste-get restarts)** | paste-get restarts. The card says "Ready for when Shizuku stops" |
+| B2 | In Shizuku, tap **Stop**. Back in paste-get | Within a few seconds Android asks to allow access to the device logs: allow it. The card says "Mode: fallback, through the system log" |
+| B3 | Go to another app, copy text, paste on the PC | Pasted. Report whether anything flashed or the keyboard closed |
+| B4 | Restart the phone, don't start Shizuku | A notification says "Copies are not sent". Tap it, allow log access, then repeat B3: it works |
+| B5 | Start Shizuku again | The card goes back to "Mode: Shizuku" within a few seconds; B3 no longer takes focus |
+| B6 | Lock the phone for 5 minutes, unlock it, repeat A2 (or B3 without Shizuku) | Still works |
+
+The phone's log names the hidden Android methods it uses, in a line like "Shizuku: watching the
+clipboard as uid 2000 with addPrimaryClipChangedListener(…), …". **Please include that line in
+your report**: it shows which variant HyperOS has. If the card says "Shizuku can't watch the
+clipboard on this phone: unknown signature …", report the whole message: the app only needs that
+signature added.
+
 ## Known limitations
 
 - If the PC changes address while the phone is connected, the phone notices only when the old
@@ -197,7 +248,10 @@ C4 worked.
   mDNS (some guest or office networks block it) still need a new pairing.
 - Screenshots taken while the phone has no connection to a computer are not sent later.
 - The phone shows nothing of its own when a clip from the PC arrives (Android 13 and later may
-  show their clipboard preview).
+  show their clipboard preview); its home screen says what came last.
+- Only text copied on the phone is sent automatically, not images or files: share those.
+- Mode B takes focus for a moment on each copy, which may close the keyboard. On Android 13+, it
+  needs paste-get opened once (and log access allowed) after each restart of the phone.
 - Changes on the PC are detected by polling every 0.5 s. On Linux this re-reads images while one sits on
   the clipboard (row 6 measures the cost). Native change events are planned.
 - IPv4 only.

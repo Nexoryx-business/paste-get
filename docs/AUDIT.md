@@ -62,7 +62,7 @@ Since Android 10, only the focused app and the default keyboard can read the cli
 | Mode | How | Pros | Cons |
 |---|---|---|---|
 | **A. Shizuku service as `shell`** | A Shizuku user service runs with the shell identity and listens to the clipboard through the hidden `IClipboard` interface. Same technique as scrcpy, which syncs the device clipboard automatically | Event-driven, clean | Hidden API: signatures change across Android versions and vendors ([scrcpy #4703](https://github.com/Genymobile/scrcpy/issues/4703)), so several reflection fallbacks are needed. Shizuku dies on reboot (no root). A "Shell pasted from your clipboard" toast may appear on Android 12+ *(verify)* |
-| **B. `READ_LOGS` + invisible overlay** | Watch logcat for the "denied clipboard access" message, then briefly focus a transparent overlay to read the clip ([ClipCascade](https://github.com/Sathvik-Rao/ClipCascade)) | Grants **survive reboots** | Hacky: steals focus, may close the keyboard. Android 13+ asks for log access every time the service starts |
+| **B. `READ_LOGS` + invisible overlay** | Watch logcat for the "denied clipboard access" message, then briefly focus a transparent overlay to read the clip ([ClipCascade](https://github.com/Sathvik-Rao/ClipCascade)) | Grants **survive reboots** | Hacky: steals focus, may close the keyboard. Android 13+ asks the user for log access each time the app starts, and only while the app is in front: one tap after a reboot |
 | **C. Our own keyboard (IME)** | The default keyboard may read the clipboard | Official, never breaks | Huge project; user must switch keyboards |
 | **D. Manual** | Quick Settings tile, share sheet, text selection menu | Works everywhere | Not automatic |
 

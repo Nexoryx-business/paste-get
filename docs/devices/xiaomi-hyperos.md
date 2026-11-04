@@ -22,6 +22,8 @@ Menu names may differ slightly between HyperOS versions and regions *(to verify 
 3. Allow Shizuku to run in the background (step 3 below, for Shizuku too).
 4. **After every reboot, Shizuku must be started again** (no root). Meanwhile paste-get falls back
    to mode B, using permissions granted earlier.
+5. In paste-get, turn on **Send what you copy**, tap **Allow in Shizuku**, then **Grant them**
+   (paste-get restarts): that prepares mode B for the next reboot.
 
 ## 3. Keep paste-get alive
 Settings → Apps → Manage apps → paste-get:
@@ -37,4 +39,13 @@ Also: open recent apps, long-press paste-get → **lock** it.
 | Photos and videos: **Allow all** | Detect new screenshots ("selected photos" breaks detection) |
 | Notifications | Foreground service + "sent ✓" feedback |
 | Camera | Scan the pairing QR code |
+| Shizuku: allow paste-get | Read the clipboard as the shell user (mode A) |
+| Display over other apps (granted through Shizuku) | Mode B: a window shown for a moment reads the clipboard |
+| Device logs (granted through Shizuku; Android asks again after each start) | Mode B: the log says when the clipboard changed |
 | Notification access (v0.2) | 2FA codes |
+
+## 5. Things to check on HyperOS *(verify)*
+- Whether mode B's window may take focus from the background, or HyperOS also wants **Display
+  pop-up windows while running in the background** (Settings → Apps → paste-get → Other
+  permissions).
+- Whether HyperOS shows its own notice when Shizuku reads the clipboard.

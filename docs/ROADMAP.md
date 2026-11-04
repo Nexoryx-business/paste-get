@@ -55,11 +55,17 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
   ✅ up to the clipboard in automated tests; pending on the real devices.
 
 ### M5 — Automatic clipboard on Android
-- [ ] Mode A: Shizuku user service listening as shell, with reflection fallbacks
-- [ ] One-time grants through Shizuku (`READ_LOGS`, overlay, …)
-- [ ] Mode B: `READ_LOGS` + overlay fallback
-- [ ] Health screen (current mode, Shizuku state, last sync)
+- [x] Mode A: Shizuku user service listening as shell, with reflection fallbacks
+- [x] One-time grants through Shizuku (`READ_LOGS`, overlay)
+- [x] Mode B: `READ_LOGS` + overlay fallback
+- [x] Health screen (current mode, Shizuku state, last sync): a card on the home screen
+- [ ] Verified on the POCO M8 5G (`TESTING.md`, section 8), including which `IClipboard`
+  signatures HyperOS has and whether Android shows "pasted from your clipboard" notices
 - **Done when:** copy on the phone → paste on the PC, no tap, even after the POCO reboots (mode B).
+  ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`, and the app's logic in Robolectric tests;
+  pending on the real phone. On Android 13+, mode B needs one tap after a reboot: Android lets an
+  app read the system log only after asking the user, while the app is in front. Android 10–12
+  start it at boot.
 
 ### M6 — PC → phone
 - [x] Text into the Android clipboard. Long texts go as a link to a file, like images: clips pass

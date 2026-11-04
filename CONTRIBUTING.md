@@ -48,6 +48,10 @@ cd android
 Gradle builds the Rust library and generates the Kotlin bindings itself. Android Studio works
 too: open the `android/` folder.
 
+Unit tests that need Android classes run on the JVM with [Robolectric](https://robolectric.org/),
+some on several Android versions. Their first run downloads those versions of Android
+(about 200 MB each) from Maven Central.
+
 ### Fuzzing
 
 Parsers of untrusted input have fuzz targets in `fuzz/`. They need a nightly toolchain:
