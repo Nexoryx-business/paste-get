@@ -60,7 +60,7 @@ impl DesktopNotifier {
     pub fn start() -> Self {
         let (queue, mut received) = mpsc::channel::<Received>(QUEUE);
         tokio::spawn(async move {
-            let mut desktop = platform::Desktop::default();
+            let mut desktop = platform::Desktop::new();
             while let Some(clip) = received.recv().await {
                 if let Err(e) = desktop.show(&clip).await {
                     tracing::debug!(error = %e, "notification not shown");
@@ -86,13 +86,16 @@ mod platform {
 
     use super::{BODY, Received, SHOWN_FOR_MS};
 
-    #[derive(Default)]
     pub struct Desktop {
         /// Opened on first use, and again after an error.
         connection: Option<Connection>,
     }
 
     impl Desktop {
+        pub fn new() -> Self {
+            Self { connection: None }
+        }
+
         pub async fn show(&mut self, received: &Received) -> zbus::Result<()> {
             let connection = match &self.connection {
                 Some(connection) => connection.clone(),
@@ -131,10 +134,13 @@ mod platform {
 mod platform {
     use super::{BODY, Received, SHOWN_FOR_MS};
 
-    #[derive(Default)]
     pub struct Desktop;
 
     impl Desktop {
+        pub fn new() -> Self {
+            Self
+        }
+
         pub async fn show(&mut self, received: &Received) -> anyhow::Result<()> {
             let summary = received.summary();
             tokio::task::spawn_blocking(move || {
