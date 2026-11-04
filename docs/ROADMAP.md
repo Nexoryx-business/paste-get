@@ -47,8 +47,12 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] Phone finds its computers again by mDNS when their address changes
 - [x] MediaStore observer, screenshot folder detection, `IS_PENDING` handling
 - [x] Send the image (JPEG as it is, other formats as PNG); the PC sets it as an image and shows a "Received ✓" notification
-- [ ] Measure latency (target < 1 s on LAN)
+- [x] Measure latency (target < 1 s on LAN): shown in the app and logged on both sides; a 2 MB
+  image takes 13 ms on loopback (`ffi/tests/phone_and_pc.rs`)
+- [ ] Verified on the POCO M8 5G with Windows and Arch, latency measured on Wi-Fi
+  (`TESTING.md`, section 6)
 - **Done when:** screenshot on the POCO → `Ctrl+V` in Discord works on Windows and Arch.
+  ✅ up to the clipboard in automated tests; pending on the real devices.
 
 ### M5 — Automatic clipboard on Android
 - [ ] Mode A: Shizuku user service listening as shell, with reflection fallbacks

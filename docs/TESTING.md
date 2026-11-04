@@ -1,7 +1,8 @@
 # Testing paste-get on real machines
 
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
-clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone.
+clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
+section 6 automatic screenshots.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -126,13 +127,57 @@ The phone and the PC must be on the **same Wi-Fi**. On the PC, run `pasteget dae
 
 Phone logs never contain clipboard contents either. To get them: `adb logcat -s paste-get`.
 
+## 6. Screenshots (M4)
+
+Goal: take a screenshot on the phone, press `Ctrl+V` on the PC, and it's there, in under a
+second. Update both sides first: `git pull` and `cargo build --release` on the PC, and the APK of
+the latest CI run on the phone (it installs over the previous one; pairings are kept).
+
+On the phone, turn on **Send new screenshots** and choose **Allow all** for photos. "Select
+photos" hides new screenshots: the card then says so and offers **Open settings**.
+
+On Hyprland, notifications need a notification daemon (mako, dunst, swaync…). KDE Plasma and
+Windows have one built in.
+
+| # | Do this | Expected |
+|---|---|---|
+| S1 | Take a screenshot on the phone, then `Ctrl+V` in Discord (or Paint, GIMP) on the PC | The screenshot is pasted, upright. The PC shows "Image from POCO M8 5G ✓" |
+| S2 | Look at the app's home screen | "Last screenshot (… kB) reached your computer in … ms" |
+| S3 | Share a photo from the gallery with **Send to PC**, paste on the PC | The photo is pasted the right way up, even if taken in portrait |
+| S4 | Turn Wi-Fi off on the phone for a minute, then on again | "Connected to 1 computer" again within a few seconds |
+| S5 | Restart the PC into the other OS (Windows ↔ Arch), start `pasteget daemon` there (pair it once if it isn't yet) | The phone connects to it within a few seconds, without a new QR code |
+| S6 | Give the PC a new IP address (switch it from Wi-Fi to Ethernet, or the other way), keep the daemon running | The phone reconnects by itself, within about 90 s at worst |
+| S7 | Lock the phone, wait 5 minutes, unlock it, take a screenshot | S1 still works |
+
+### Measuring latency (target: under 1 s)
+
+Two numbers, both on the phone:
+- The home screen (S2) counts from the moment Android announced the new screenshot file to the
+  PC's acknowledgement. Repeat S1 five times and note the values.
+- `adb logcat -s paste-get` shows each step: "screenshot of … bytes read in … ms", then
+  "delivered … ms after sending, … ms after Android announced the screenshot".
+
+On the PC, the daemon logs "clip received … ms" (the transfer) and "clip applied to the clipboard
+… ms" (decoding the image and setting the clipboard). Add that last number to the phone's to get
+the whole path. The time HyperOS takes to save the screenshot comes before all of these.
+
+Report the five values per OS, and whether S1 felt instant.
+
+### Settings
+
+Notifications are set in `settings.toml`, in `%APPDATA%\paste-get\default\` on Windows and
+`~/.config/paste-get/default/` on Linux: `notify = "images"` (the default), `"all"` (text too) or
+`"off"`. Restart the daemon after a change.
+
 ## Known limitations
 
-- The phone only knows the PC addresses from the pairing code. If the PC gets a new IP address
-  (DHCP), pair again. Finding the PC by mDNS is planned (M4).
+- If the PC changes address while the phone is connected, the phone notices only when the old
+  connection times out (up to 90 s), then finds it again by mDNS. Phones that can't receive
+  mDNS (some guest or office networks block it) still need a new pairing.
+- Screenshots taken while the phone has no connection to a computer are not sent later.
 - Images sent from the PC to the phone are ignored for now (M6).
 - Changes on the PC are detected by polling every 0.5 s. On Linux this re-reads images while one sits on
   the clipboard (row 6 measures the cost). Native change events are planned.
 - IPv4 only.
 - The identity key is a file readable only by your user, not yet in the OS keystore.
-- Text and PNG only. Copying a file in a file manager isn't synced.
+- Text and images only (PNG and JPEG on the wire). Copying a file in a file manager isn't synced.

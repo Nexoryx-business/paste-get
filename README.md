@@ -7,9 +7,9 @@ Copy something or take a screenshot on the phone, and it's already on your PC's 
 with no button to press. Local-first, end-to-end encrypted, no account, no cloud.
 
 > **Status: pre-alpha.** The protocol core, the desktop daemon and a first Android app work:
-> share text or an image from the phone and it lands on the PC clipboard. Automatic sync of
-> every copy (through Shizuku) is next. See [`docs/TESTING.md`](docs/TESTING.md) to try it.
-> The name is a working title.
+> take a screenshot on the phone and it's on the PC clipboard, with a notification; share text or
+> an image and it lands there too. Automatic sync of every copy (through Shizuku) is next. See
+> [`docs/TESTING.md`](docs/TESTING.md) to try it. The name is a working title.
 
 ## Planned highlights
 
