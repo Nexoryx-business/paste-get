@@ -80,6 +80,7 @@ fn start_pc_in(home: tempfile::TempDir) -> Pc {
         advertised_ips: Some(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
         poll_interval: Duration::from_millis(10),
         announce: false,
+        notifier: None,
     };
     let daemon = runtime
         .block_on(Daemon::start(profile, clipboard.clone(), options))

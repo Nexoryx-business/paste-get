@@ -145,6 +145,19 @@ pub struct Settings {
     pub device_name: String,
     /// TCP port the daemon listens on.
     pub port: u16,
+    /// Which received clips show a notification.
+    pub notify: NotifyFor,
+}
+
+/// `notify = "images"` in `settings.toml`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyFor {
+    Off,
+    /// Images only: text is copied too often for a notification each time.
+    #[default]
+    Images,
+    All,
 }
 
 impl Default for Settings {
@@ -160,6 +173,7 @@ impl Default for Settings {
             // The OS tells apart the two sides of a dual-boot machine.
             device_name: sanitize_device_name(&format!("{host} ({os})")),
             port: DEFAULT_PORT,
+            notify: NotifyFor::default(),
         }
     }
 }
@@ -335,6 +349,11 @@ mod tests {
         let edited = profile.settings().unwrap();
         assert_eq!(edited.device_name, "Mon PC");
         assert_eq!(edited.port, 5000);
+        // Settings files from before a setting existed get its default.
+        assert_eq!(edited.notify, NotifyFor::Images);
+
+        fs::write(profile.dir().join(SETTINGS_FILE), "notify = \"all\"\n").unwrap();
+        assert_eq!(profile.settings().unwrap().notify, NotifyFor::All);
     }
 
     #[test]

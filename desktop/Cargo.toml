@@ -39,3 +39,11 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_DataExchange"] }
+
+# Notifications: Windows toasts and macOS through notify-rust, the freedesktop D-Bus service
+# elsewhere (KDE Plasma, mako, dunst, swaync…).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+notify-rust = { version = "4", default-features = false }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+zbus = { version = "6", default-features = false, features = ["tokio"] }

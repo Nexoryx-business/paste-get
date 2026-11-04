@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use pasteget_core::clip::Clip;
+use pasteget_core::clip::{Clip, mime};
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, PairingWindow};
@@ -29,8 +29,9 @@ use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
-use crate::config::{KnownDevice, KnownDevices, Profile};
+use crate::config::{KnownDevice, KnownDevices, NotifyFor, Profile};
 use crate::discovery::Advertiser;
+use crate::notify::{Notifier, Received};
 
 /// Time a not-yet-paired device has to send its pairing request.
 const PAIRING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -45,6 +46,8 @@ pub struct DaemonOptions {
     pub poll_interval: Duration,
     /// Announce the daemon on the local network with mDNS.
     pub announce: bool,
+    /// Shows "Image from … ✓" when a clip lands on the clipboard, as `settings.toml` asks.
+    pub notifier: Option<Arc<dyn Notifier>>,
 }
 
 impl DaemonOptions {
@@ -54,6 +57,7 @@ impl DaemonOptions {
             advertised_ips: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
             announce: true,
+            notifier: None,
         }
     }
 }
@@ -99,6 +103,8 @@ struct Shared {
     peers: Peers,
     guard: Mutex<EchoGuard>,
     clipboard: ClipboardWatcher,
+    notifier: Option<Arc<dyn Notifier>>,
+    notify_for: NotifyFor,
     events: broadcast::Sender<Event>,
     tasks: Mutex<JoinSet<()>>,
 }
@@ -133,6 +139,8 @@ impl Daemon {
             pairing: AsyncMutex::new(None),
             peers: Peers::new(),
             clipboard,
+            notifier: options.notifier,
+            notify_for: settings.notify,
             events,
             tasks: Mutex::new(JoinSet::new()),
         });
@@ -345,12 +353,31 @@ impl SessionEvents for Shared {
             return;
         }
         lock(&self.guard).applied_remote(&clip);
+
+        let received = Received {
+            image: clip.mime_type != mime::TEXT,
+            from: lock(&self.known)
+                .get(&peer)
+                .map_or_else(|| "a paired device".to_owned(), |d| d.name.clone()),
+        };
+        // Sensitive clips stay as quiet as possible.
+        let notifier = self
+            .notifier
+            .clone()
+            .filter(|_| !clip.sensitive && received.wanted_by(self.notify_for));
+        let (mime_type, len) = (clip.mime_type.clone(), clip.data.len());
+        let applied = move |took: Duration| {
+            tracing::info!(%mime_type, len, ms = took.as_millis(), "clip applied to the clipboard");
+            if let Some(notifier) = notifier {
+                notifier.received(received);
+            }
+        };
         let content = Content {
             mime_type: clip.mime_type.clone(),
             data: clip.data.clone(),
             sensitive: clip.sensitive,
         };
-        if let Err(e) = self.clipboard.write(content) {
+        if let Err(e) = self.clipboard.write(content, applied) {
             tracing::warn!(error = %e, "received clip not applied");
         }
         self.peers.broadcast(&clip, Some(peer));
@@ -468,7 +495,17 @@ mod tests {
     struct TestDaemon {
         daemon: Daemon,
         clipboard: MemoryClipboard,
+        notifications: Arc<Notifications>,
         _home: tempfile::TempDir,
+    }
+
+    #[derive(Debug, Default)]
+    struct Notifications(Mutex<Vec<Received>>);
+
+    impl Notifier for Notifications {
+        fn received(&self, received: Received) {
+            self.0.lock().unwrap().push(received);
+        }
     }
 
     async fn start(name: &str) -> TestDaemon {
@@ -480,11 +517,13 @@ mod tests {
         )
         .unwrap();
         let clipboard = MemoryClipboard::default();
+        let notifications = Arc::new(Notifications::default());
         let options = DaemonOptions {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
             advertised_ips: Some(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
             poll_interval: Duration::from_millis(10),
             announce: false,
+            notifier: Some(Arc::clone(&notifications) as Arc<dyn Notifier>),
         };
         let daemon = Daemon::start(profile, clipboard.clone(), options)
             .await
@@ -492,6 +531,7 @@ mod tests {
         TestDaemon {
             daemon,
             clipboard,
+            notifications,
             _home: home,
         }
     }
@@ -539,6 +579,16 @@ mod tests {
         // Nothing bounces back: the laptop's clipboard keeps the image.
         sleep(Duration::from_millis(100)).await;
         assert_eq!(laptop.clipboard.get(), Some(image));
+
+        // By default, only images show a notification.
+        assert_eq!(
+            *laptop.notifications.0.lock().unwrap(),
+            [Received {
+                image: true,
+                from: "pc".into()
+            }]
+        );
+        assert!(pc.notifications.0.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

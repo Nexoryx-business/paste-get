@@ -13,7 +13,7 @@ use std::io::Cursor;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
@@ -308,7 +308,14 @@ impl ClipboardBackend for MemoryClipboard {
 /// daemon started isn't reported either: only new copies are sent.
 #[derive(Debug)]
 pub struct ClipboardWatcher {
-    writes: mpsc::Sender<Content>,
+    writes: mpsc::Sender<WriteRequest>,
+}
+
+/// Content from a peer to put on the clipboard.
+struct WriteRequest {
+    content: Content,
+    /// Called once it's on the clipboard, with the time decoding and writing took.
+    applied: Box<dyn FnOnce(Duration) + Send>,
 }
 
 impl ClipboardWatcher {
@@ -327,25 +334,34 @@ impl ClipboardWatcher {
         Ok(Self { writes })
     }
 
-    /// Puts content received from a peer on the clipboard.
-    pub fn write(&self, content: Content) -> Result<()> {
+    /// Puts content received from a peer on the clipboard, then calls `applied` (from the
+    /// clipboard thread: keep it quick). Not called if the content can't be applied.
+    pub fn write(
+        &self,
+        content: Content,
+        applied: impl FnOnce(Duration) + Send + 'static,
+    ) -> Result<()> {
         self.writes
-            .send(content)
-            .context("the clipboard thread has stopped")
+            .send(WriteRequest {
+                content,
+                applied: Box::new(applied),
+            })
+            .map_err(|_| anyhow::anyhow!("the clipboard thread has stopped"))
     }
 }
 
 fn watch(
     mut backend: impl ClipboardBackend,
     poll_interval: Duration,
-    write_requests: &mpsc::Receiver<Content>,
+    write_requests: &mpsc::Receiver<WriteRequest>,
     changes: &async_mpsc::Sender<Content>,
 ) {
     let mut last_seen = backend.read().ok().flatten().map(|raw| raw.fingerprint());
 
     loop {
         match write_requests.recv_timeout(poll_interval) {
-            Ok(content) => {
+            Ok(WriteRequest { content, applied }) => {
+                let started = Instant::now();
                 let raw = match content.to_raw() {
                     Ok(raw) => raw,
                     Err(e) => {
@@ -354,7 +370,10 @@ fn watch(
                     }
                 };
                 match backend.write(&raw, content.sensitive) {
-                    Ok(()) => last_seen = Some(raw.fingerprint()),
+                    Ok(()) => {
+                        last_seen = Some(raw.fingerprint());
+                        applied(started.elapsed());
+                    }
                     Err(e) => tracing::warn!(error = %e, "could not write to the clipboard"),
                 }
             }
@@ -519,10 +538,14 @@ mod tests {
         let watcher = ClipboardWatcher::spawn(clipboard.clone(), POLL, tx).unwrap();
 
         let received = Content::from_raw(Raw::Image(image(2, 2))).unwrap();
-        watcher.write(received).unwrap();
+        let (applied_tx, applied) = mpsc::channel();
+        watcher
+            .write(received, move |_| applied_tx.send(()).unwrap())
+            .unwrap();
         tokio::time::sleep(POLL * 10).await;
 
         assert_eq!(clipboard.get(), Some(Raw::Image(image(2, 2))));
+        assert!(applied.try_recv().is_ok(), "the write was not reported");
         assert!(next_change(&mut changes).await.is_none());
     }
 
@@ -532,15 +555,18 @@ mod tests {
         let (tx, _changes) = async_mpsc::channel(8);
         let watcher = ClipboardWatcher::spawn(clipboard.clone(), POLL, tx).unwrap();
 
+        let (applied_tx, applied) = mpsc::channel();
+        let broken = Content {
+            mime_type: mime::PNG.into(),
+            data: b"\x89PNG but not really".to_vec(),
+            sensitive: false,
+        };
         watcher
-            .write(Content {
-                mime_type: mime::PNG.into(),
-                data: b"\x89PNG but not really".to_vec(),
-                sensitive: false,
-            })
+            .write(broken, move |_| applied_tx.send(()).unwrap())
             .unwrap();
         tokio::time::sleep(POLL * 10).await;
 
         assert_eq!(clipboard.get(), None);
+        assert!(applied.try_recv().is_err(), "a failed write was reported");
     }
 }

@@ -15,6 +15,7 @@ use pasteget_desktop::clipboard::{MemoryClipboard, SystemClipboard};
 use pasteget_desktop::config::{DEFAULT_PROFILE, Profile};
 use pasteget_desktop::control::{self, Endpoint, Request, Response};
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
+use pasteget_desktop::notify::DesktopNotifier;
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
@@ -112,7 +113,12 @@ async fn daemon(
             profile.name()
         );
     }
-    let options = DaemonOptions::listen_on(port.unwrap_or(profile.settings()?.port));
+    let mut options = DaemonOptions::listen_on(port.unwrap_or(profile.settings()?.port));
+    // A memory-clipboard daemon stands in for another device: its notifications would only
+    // confuse.
+    if !memory_clipboard {
+        options.notifier = Some(Arc::new(DesktopNotifier::start()));
+    }
     let daemon = if memory_clipboard {
         Daemon::start(profile, MemoryClipboard::default(), options).await?
     } else {
