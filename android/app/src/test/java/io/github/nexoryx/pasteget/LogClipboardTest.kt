@@ -17,14 +17,16 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowSettings
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
-/** Mode B's states on Android 16 (Robolectric runs the app's target SDK). There is no logcat here. */
+/** Mode B's states on Android 15 and 16, and 10 where it says so. There is no logcat here. */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35, 36])
 class LogClipboardTest {
     private val app: Application = RuntimeEnvironment.getApplication()
     private val copies = LinkedBlockingQueue<CopiedText>()
@@ -61,6 +63,18 @@ class LogClipboardTest {
         assertNotNull(waitingNotification)
 
         logs.setInFront(true)
+        assertEquals(LogStatus.STARTING, logs.state.value)
+        assertNull(waitingNotification)
+    }
+
+    /** Before Android 13, reading the log needs no consent: it starts at boot, no tap needed. */
+    @Test
+    @Config(sdk = [29])
+    fun beforeAndroid13ItStartsWithoutTheApp() {
+        grantFallback()
+
+        logs.setActive(true)
+
         assertEquals(LogStatus.STARTING, logs.state.value)
         assertNull(waitingNotification)
     }

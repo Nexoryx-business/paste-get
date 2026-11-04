@@ -34,9 +34,6 @@ object ReceivedClips {
     /** Clips are applied one at a time, in order, and off the client's threads, which must not wait. */
     private val worker = Executors.newSingleThreadExecutor()
 
-    /** Only used on [worker]. */
-    private var files: ClipFiles? = null
-
     /** When the app last set the clipboard ([SystemClock.elapsedRealtime]). */
     @Volatile
     private var appliedAt = Long.MIN_VALUE / 2
@@ -97,15 +94,14 @@ object ReceivedClips {
             return ClipData.newPlainText(label, data.decodeToString())
         }
         val type = ClipFiles.clipboardType(mimeType) ?: return null
-        val file = files(context).save(mimeType, data) ?: return null
+        val file = clipFiles(context).save(mimeType, data) ?: return null
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.clips", file)
         Log.i(TAG, "clip saved as ${file.name} for the clipboard")
         return ClipData(ClipDescription(label, arrayOf(type)), ClipData.Item(uri))
     }
 
     /** In the cache directory, which `res/xml/clip_files.xml` lets the FileProvider serve. */
-    private fun files(context: Context): ClipFiles =
-        files ?: ClipFiles(File(context.cacheDir, "clips")).also { files = it }
+    private fun clipFiles(context: Context) = ClipFiles(File(context.cacheDir, "clips"))
 }
 
 /** A clip from a computer, received at [atMillis] (wall clock). Its type and size only. */

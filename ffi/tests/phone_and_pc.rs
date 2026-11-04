@@ -40,6 +40,8 @@ fn jpeg(width: u32, height: u32) -> Vec<u8> {
 struct Recorder {
     connections: Mutex<Vec<bool>>,
     clips: Mutex<Vec<(String, Vec<u8>)>>,
+    /// The `sensitive` flag of each clip in `clips`.
+    sensitive: Mutex<Vec<bool>>,
     deliveries: Mutex<Vec<ClipDelivery>>,
 }
 
@@ -48,8 +50,9 @@ impl PhoneListener for Recorder {
         self.connections.lock().unwrap().push(connected);
     }
 
-    fn on_clip_received(&self, mime_type: String, data: Vec<u8>, _sensitive: bool) {
+    fn on_clip_received(&self, mime_type: String, data: Vec<u8>, sensitive: bool) {
         self.clips.lock().unwrap().push((mime_type, data));
+        self.sensitive.lock().unwrap().push(sensitive);
     }
 
     fn on_clip_delivered(&self, delivery: ClipDelivery) {
@@ -113,6 +116,42 @@ fn restart(pc: Pc) -> Pc {
 
 fn path_of(dir: &tempfile::TempDir) -> String {
     dir.path().to_str().unwrap().to_owned()
+}
+
+/// A phone paired with `pc` and connected to it.
+struct Phone {
+    client: Arc<PhoneClient>,
+    listener: Arc<Recorder>,
+    _dir: tempfile::TempDir,
+}
+
+fn connected_phone(pc: &Pc, name: &str) -> Phone {
+    let qr_code = pc
+        .runtime
+        .block_on(pc.daemon.open_pairing())
+        .unwrap()
+        .to_uri();
+    let dir = tempfile::tempdir().unwrap();
+    let client = PhoneClient::new(path_of(&dir), name.into()).unwrap();
+    client.pair(qr_code).unwrap();
+    let listener = Arc::new(Recorder::default());
+    client.start(listener.clone());
+    wait_until("the connection", || client.connected_count() == 1);
+    Phone {
+        client,
+        listener,
+        _dir: dir,
+    }
+}
+
+impl Phone {
+    /// Waits for the `n`th clip (from 1) and returns it.
+    fn clip(&self, n: usize) -> (String, Vec<u8>) {
+        wait_until("a clip on the phone", || {
+            self.listener.clips.lock().unwrap().len() >= n
+        });
+        self.listener.clips.lock().unwrap()[n - 1].clone()
+    }
 }
 
 #[test]
@@ -373,6 +412,93 @@ fn copies_on_the_phone_reach_the_pc_without_echo() {
     wait_until("the second copy on the PC clipboard", || {
         pc.clipboard.get() == Some(Raw::Text("encore".into()))
     });
+}
+
+/// Roadmap M6: text of any length copied on the PC reaches the phone whole, in many chunks.
+/// The app puts texts this long on its clipboard as a file link (Binder's 1 MB limit).
+#[test]
+fn a_long_text_copied_on_the_pc_reaches_the_phone_whole() {
+    let pc = start_pc();
+    let phone = connected_phone(&pc, "POCO");
+
+    // 3 MB of text with characters of 1 to 4 bytes, so chunks split some of them.
+    let text: String = (0..1_200_000)
+        .map(|i| ["a", "é", "€", "👋"][i % 4])
+        .collect();
+    assert_eq!(text.len(), 3_000_000);
+    pc.clipboard.set(Raw::Text(text.clone()));
+
+    let (mime_type, data) = phone.clip(1);
+    assert_eq!(mime_type, mime::TEXT);
+    assert_eq!(String::from_utf8(data).unwrap(), text);
+}
+
+/// Roadmap M6: a clip the PC marks as secret stays marked on the phone, which keeps it out of
+/// clipboard history.
+#[test]
+fn a_sensitive_clip_from_the_pc_stays_sensitive() {
+    let pc = start_pc();
+    let phone = connected_phone(&pc, "POCO");
+
+    pc.daemon.send(Content {
+        mime_type: mime::TEXT.into(),
+        data: b"hunter2".to_vec(),
+        sensitive: true,
+    });
+
+    assert_eq!(phone.clip(1), (mime::TEXT.to_owned(), b"hunter2".to_vec()));
+    assert_eq!(*phone.listener.sensitive.lock().unwrap(), [true]);
+}
+
+/// Roadmap M6, done when: a full-HD screenshot copied on the PC reaches the phone as a PNG
+/// with the same pixels.
+#[test]
+fn a_full_hd_screenshot_copied_on_the_pc_reaches_the_phone() {
+    let pc = start_pc();
+    let phone = connected_phone(&pc, "POCO");
+    let (width, height) = (1920u32, 1080u32);
+    let pixels: Vec<u8> = (0..width * height)
+        .flat_map(|i| {
+            let (x, y) = (i % width, i / width);
+            [(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255]
+        })
+        .collect();
+    let started = Instant::now();
+
+    pc.clipboard.set(Raw::Image(RgbaImage {
+        width,
+        height,
+        pixels: pixels.clone(),
+    }));
+
+    let (mime_type, png) = phone.clip(1);
+    println!(
+        "{width}x{height} screenshot: {} bytes of PNG on the phone in {} ms (debug build)",
+        png.len(),
+        started.elapsed().as_millis()
+    );
+    assert_eq!(mime_type, mime::PNG);
+    let received = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+        .unwrap()
+        .into_rgba8();
+    assert_eq!((received.width(), received.height()), (width, height));
+    assert!(received.into_raw() == pixels, "the pixels differ");
+}
+
+/// A JPEG photo shared from one phone reaches the other phones through the PC, as it is.
+#[test]
+fn a_jpeg_from_one_phone_reaches_another_through_the_pc() {
+    let pc = start_pc();
+    let first = connected_phone(&pc, "POCO");
+    let second = connected_phone(&pc, "Tablet");
+    let photo = jpeg(64, 48);
+
+    assert_eq!(first.client.send_image(photo.clone()).unwrap(), 1);
+
+    assert_eq!(second.clip(1), (mime::JPEG.to_owned(), photo));
+    // Not back to the phone it came from.
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(first.listener.clips.lock().unwrap().is_empty());
 }
 
 #[test]

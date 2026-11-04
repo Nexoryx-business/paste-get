@@ -13,8 +13,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [29, 35, 36])
 class CopiedTextTest {
     private fun text(text: String, vararg extras: String): ClipData = ClipData.newPlainText("label", text).apply {
         description.extras = PersistableBundle().apply { extras.forEach { putBoolean(it, true) } }
