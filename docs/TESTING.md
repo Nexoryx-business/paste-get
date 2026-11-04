@@ -179,10 +179,16 @@ on the phone. Update both sides first, as in section 6.
 | C1 | PC: copy some text. Phone: long-press a text field → **Paste** | The text is pasted |
 | C2 | PC: open a text file over 1 MB (a log, for example), select all, copy. Phone: paste it in a notes app | The whole text is pasted, and the paste-get notification is still there |
 | C3 | Lock the phone for 5 minutes, unlock it, repeat C1 | Still works, without opening the app |
+| C4 | PC: take a screenshot to the clipboard (as in section 3). Phone: in Telegram, WhatsApp or Google Messages, long-press the message field → **Paste** | The screenshot is attached, ready to send |
+| C5 | PC: in a browser, right-click an image → **Copy image**. Phone: paste it as in C4 | The image is attached |
+| C6 | If you use Gboard: after C4, open its clipboard (the clipboard icon above the keys) | The screenshot is there; tapping it inserts it in apps that take images (Discord, for example) |
 
-`adb logcat -s paste-get` shows "clip received: text/plain…, … bytes" for each clip, and for C2
-"clip saved as clip-….txt for the clipboard": texts over 256 KB go on the clipboard as a link to
-a file, since Android can't pass that much in one go.
+`adb logcat -s paste-get` shows "clip received: …, … bytes" for each clip. Images, and texts over
+256 KB (C2), go on the clipboard as a link to a file, since Android can't pass that much in one
+go: the log then also says "clip saved as clip-….png for the clipboard".
+
+Report which rows passed with the PC on Windows, KDE Plasma and Hyprland, and in which phone apps
+C4 worked.
 
 ## Known limitations
 
@@ -190,7 +196,8 @@ a file, since Android can't pass that much in one go.
   connection times out (up to 90 s), then finds it again by mDNS. Phones that can't receive
   mDNS (some guest or office networks block it) still need a new pairing.
 - Screenshots taken while the phone has no connection to a computer are not sent later.
-- Images sent from the PC to the phone are ignored for now (M6).
+- The phone shows nothing of its own when a clip from the PC arrives (Android 13 and later may
+  show their clipboard preview).
 - Changes on the PC are detected by polling every 0.5 s. On Linux this re-reads images while one sits on
   the clipboard (row 6 measures the cost). Native change events are planned.
 - IPv4 only.

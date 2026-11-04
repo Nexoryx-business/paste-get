@@ -21,10 +21,12 @@ class ClipFilesTest {
     private fun names(dir: File) = dir.list().orEmpty().sorted()
 
     @Test
-    fun onlyLongTextsGoThroughAFile() {
+    fun imagesAndLongTextsGoThroughAFile() {
         assertFalse(ClipFiles.needsFile(text, 0))
         assertFalse(ClipFiles.needsFile(text, ClipFiles.MAX_INLINE_TEXT))
         assertTrue(ClipFiles.needsFile(text, ClipFiles.MAX_INLINE_TEXT + 1))
+        assertTrue(ClipFiles.needsFile(ClipFiles.PNG, 100))
+        assertTrue(ClipFiles.needsFile(ClipFiles.JPEG, 100))
     }
 
     @Test
@@ -39,14 +41,24 @@ class ClipFilesTest {
     }
 
     @Test
+    fun imagesKeepTheirTypeInTheirName() {
+        val files = ClipFiles(temp.root)
+
+        assertEquals("clip-1.png", files.save(ClipFiles.PNG, byteArrayOf(1))!!.name)
+        assertEquals("clip-2.jpg", files.save(ClipFiles.JPEG, byteArrayOf(2))!!.name)
+        assertEquals("image/png", ClipFiles.clipboardType(ClipFiles.PNG))
+        assertEquals("image/jpeg", ClipFiles.clipboardType(ClipFiles.JPEG))
+    }
+
+    @Test
     fun onlyTheNewestFilesAreKept() {
         val files = ClipFiles(temp.root, keep = 2)
 
         files.save(text, byteArrayOf(1))
-        files.save(text, byteArrayOf(2))
+        files.save(ClipFiles.PNG, byteArrayOf(2))
         val newest = files.save(text, byteArrayOf(3))!!
 
-        assertEquals(listOf("clip-2.txt", "clip-3.txt"), names(temp.root))
+        assertEquals(listOf("clip-2.png", "clip-3.txt"), names(temp.root))
         assertArrayEquals(byteArrayOf(3), newest.readBytes())
     }
 

@@ -64,8 +64,10 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 ### M6 — PC → phone
 - [x] Text into the Android clipboard. Long texts go as a link to a file, like images: clips pass
   through Binder, whose buffer is 1 MB
-- [ ] Images through `FileProvider`
+- [x] Images through `FileProvider`
+- [ ] Verified on the POCO M8 5G with Windows and Arch (`TESTING.md`, section 7)
 - **Done when:** a PC screenshot pastes into a phone app.
+  ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`; pending on the real devices.
 
 ### M7 — Tray app
 - [ ] Tauri 2 tray: status, paired devices, pause, last items

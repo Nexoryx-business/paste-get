@@ -54,6 +54,8 @@ class ClipFiles(private val dir: File, private val keep: Int = KEEP) {
 
     companion object {
         const val TEXT = "text/plain;charset=utf-8"
+        const val PNG = "image/png"
+        const val JPEG = "image/jpeg"
 
         /** The newest file and the two before it. */
         const val KEEP = 3
@@ -68,6 +70,8 @@ class ClipFiles(private val dir: File, private val keep: Int = KEEP) {
 
         private val KINDS = mapOf(
             TEXT to Kind("txt", "text/plain"),
+            PNG to Kind("png", PNG),
+            JPEG to Kind("jpg", JPEG),
         )
 
         /** Whether a clip of [size] bytes goes on the clipboard as a file link. */

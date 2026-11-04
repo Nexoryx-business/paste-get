@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The phone API against a real desktop daemon (with an in-memory clipboard): roadmap M3's
-//! "sharing text from the phone puts it on the PC clipboard", minus the Android UI.
+//! The phone API against a real desktop daemon (with an in-memory clipboard): what the roadmap
+//! asks of the Android app (M3, M4, M6), minus its UI and the phone's own clipboard.
 
 // Test code: a panic is a test failure.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -292,6 +292,43 @@ fn a_screenshot_sized_image_is_delivered_in_under_a_second() {
     assert_eq!(delivery.size, size);
     assert!(delivery.accepted);
     assert!(delivery.millis < 1000, "took {} ms", delivery.millis);
+}
+
+/// Roadmap M6: a screenshot copied on the PC reaches the phone, as a PNG the app puts on its
+/// clipboard.
+#[test]
+fn an_image_copied_on_the_pc_reaches_the_phone() {
+    let pc = start_pc();
+    let qr_code = pc
+        .runtime
+        .block_on(pc.daemon.open_pairing())
+        .unwrap()
+        .to_uri();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let phone = PhoneClient::new(path_of(&phone_dir), "POCO".into()).unwrap();
+    phone.pair(qr_code).unwrap();
+    let listener = Arc::new(Recorder::default());
+    phone.start(listener.clone());
+    wait_until("the connection", || phone.connected_count() == 1);
+
+    // Win+Shift+S, Spectacle or grim puts the screenshot on the PC clipboard.
+    let screenshot = RgbaImage {
+        width: 4,
+        height: 3,
+        pixels: (0..4 * 3 * 4).map(|i| (i * 21) as u8).collect(),
+    };
+    pc.clipboard.set(Raw::Image(screenshot.clone()));
+
+    wait_until("the image on the phone", || {
+        !listener.clips.lock().unwrap().is_empty()
+    });
+    let (mime_type, png) = listener.clips.lock().unwrap()[0].clone();
+    assert_eq!(mime_type, mime::PNG);
+    let received = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+        .unwrap()
+        .into_rgba8();
+    assert_eq!((received.width(), received.height()), (4, 3));
+    assert_eq!(received.into_raw(), screenshot.pixels);
 }
 
 #[test]
