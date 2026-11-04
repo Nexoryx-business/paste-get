@@ -731,6 +731,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1193,6 +1195,7 @@ dependencies = [
 name = "pasteget-ffi"
 version = "0.0.0"
 dependencies = [
+ "image",
  "pasteget-core",
  "pasteget-desktop",
  "serde",

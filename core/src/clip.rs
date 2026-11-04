@@ -24,11 +24,31 @@ pub const DEFAULT_MAX_CLIP_LEN: u64 = 64 * 1024 * 1024;
 pub mod mime {
     pub const TEXT: &str = "text/plain;charset=utf-8";
     pub const PNG: &str = "image/png";
+    /// Sent as it is when the image already is a JPEG: phone screenshots and photos often are,
+    /// and re-encoding them as PNG on the phone would cost time and bandwidth.
+    pub const JPEG: &str = "image/jpeg";
+
+    const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    const JPEG_SIGNATURE: &[u8] = b"\xff\xd8\xff";
+
+    pub fn is_supported(mime_type: &str) -> bool {
+        [TEXT, PNG, JPEG].contains(&mime_type)
+    }
+
+    /// [`PNG`] or [`JPEG`], from the image's signature. `None` for any other data.
+    pub fn of_image(data: &[u8]) -> Option<&'static str> {
+        if data.starts_with(PNG_SIGNATURE) {
+            Some(PNG)
+        } else if data.starts_with(JPEG_SIGNATURE) {
+            Some(JPEG)
+        } else {
+            None
+        }
+    }
 }
 
 const CLIP_ID_LEN: usize = 16;
 const SHA256_LEN: usize = 32;
-const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not generate a random clip ID")]
@@ -188,7 +208,7 @@ impl ClipReceiver {
         if offer.clip_id.len() != CLIP_ID_LEN || offer.sha256.len() != SHA256_LEN {
             return reject(AckStatus::ProtocolError);
         }
-        if offer.mime_type != mime::TEXT && offer.mime_type != mime::PNG {
+        if !mime::is_supported(&offer.mime_type) {
             return reject(AckStatus::UnsupportedType);
         }
         if offer.size > self.max_len {
@@ -269,7 +289,7 @@ fn finish(incoming: Incoming) -> Received {
 fn content_matches_type(mime_type: &str, data: &[u8]) -> bool {
     match mime_type {
         mime::TEXT => std::str::from_utf8(data).is_ok(),
-        mime::PNG => data.starts_with(PNG_SIGNATURE),
+        mime::PNG | mime::JPEG => mime::of_image(data) == Some(mime_type),
         _ => false,
     }
 }
@@ -294,7 +314,7 @@ mod tests {
     const ORIGIN: DeviceId = DeviceId::from_bytes([9; DeviceId::LEN]);
 
     fn png_of_len(len: usize) -> Vec<u8> {
-        let mut data = PNG_SIGNATURE.to_vec();
+        let mut data = b"\x89PNG\r\n\x1a\n".to_vec();
         data.resize(len, 0x42);
         data
     }
@@ -427,6 +447,39 @@ mod tests {
             status(&transfer(&clip, &mut ClipReceiver::default())),
             AckStatus::ProtocolError
         );
+    }
+
+    #[test]
+    fn jpeg_arrives_as_it_is_and_must_be_a_jpeg() {
+        let jpeg = Clip {
+            mime_type: mime::JPEG.to_owned(),
+            data: b"\xff\xd8\xff\xe0 rest of the file".to_vec(),
+            sensitive: false,
+            origin: ORIGIN,
+        };
+        let Received::Clip { clip, .. } = transfer(&jpeg, &mut ClipReceiver::default()) else {
+            panic!("the JPEG was refused");
+        };
+        assert_eq!(clip, jpeg);
+
+        // A PNG labelled as a JPEG is refused.
+        let mislabelled = Clip {
+            mime_type: mime::JPEG.to_owned(),
+            ..Clip::png(png_of_len(100), ORIGIN)
+        };
+        assert_eq!(
+            status(&transfer(&mislabelled, &mut ClipReceiver::default())),
+            AckStatus::ProtocolError
+        );
+    }
+
+    #[test]
+    fn image_types_come_from_signatures() {
+        assert_eq!(mime::of_image(&png_of_len(20)), Some(mime::PNG));
+        assert_eq!(mime::of_image(b"\xff\xd8\xff\xdb"), Some(mime::JPEG));
+        assert_eq!(mime::of_image(b"GIF89a"), None);
+        assert_eq!(mime::of_image(b"\xff\xd8"), None);
+        assert_eq!(mime::of_image(b""), None);
     }
 
     #[test]

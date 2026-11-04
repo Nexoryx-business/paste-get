@@ -127,7 +127,8 @@ Only one clip is in flight per direction at a time: a new `ClipOffer` cancels an
 - `clip_id` is 16 bytes, `sha256` and `origin_device` are 32 bytes; anything else is a
   `PROTOCOL_ERROR`.
 - When the clip is complete, the receiver checks the hash, then that the content matches its type:
-  valid UTF-8 for text, the PNG signature for images. Failing content is a `PROTOCOL_ERROR`.
+  valid UTF-8 for text, the PNG or JPEG signature for images. Failing content is a
+  `PROTOCOL_ERROR`.
 - Any `PROTOCOL_ERROR` discards the clip in flight.
 
 | `Ack.status` | When |
@@ -140,7 +141,13 @@ Only one clip is in flight per direction at a time: a new `ClipOffer` cancels an
 
 **MIME types in version 0:**
 - `text/plain;charset=utf-8`: UTF-8 text without byte-order mark
-- `image/png`: images are always converted to PNG before sending
+- `image/png`: starts with `89 50 4E 47 0D 0A 1A 0A`
+- `image/jpeg`: starts with `FF D8 FF`. Images that already are JPEG files (phone screenshots and
+  photos) are sent as they are: re-encoding them as PNG on a phone costs more time than sending
+  them. A receiver applies the EXIF orientation when it decodes one.
+
+Images in any other format are converted to PNG before sending. A receiver decodes images with
+limits on their dimensions and memory, since a small file can claim a huge size.
 
 **`origin_device`** is the device ID of the device where the clip was first copied. A device
 never re-sends a clip it received (see *Echo loops*), and ignores offers whose

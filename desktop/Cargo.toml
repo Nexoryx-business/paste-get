@@ -20,7 +20,7 @@ data-encoding = "2"
 dirs = "7"
 gethostname = "1"
 if-addrs = "0.15.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 mdns-sd = "0.21"
 pasteget-core = { path = "../core" }
 qrcode = { version = "0.14", default-features = false }

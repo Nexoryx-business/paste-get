@@ -38,7 +38,6 @@ uniffi::setup_scaffolding!();
 
 const IDENTITY_FILE: &str = "identity.key";
 const COMPUTERS_FILE: &str = "computers.json";
-const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 /// Addresses remembered per computer, and found addresses tried per announcement.
 const MAX_ADDRESSES: usize = 8;
 
@@ -51,8 +50,8 @@ pub enum PastegetError {
     Unreachable(String),
     #[error("pairing failed: {0}")]
     PairingFailed(String),
-    #[error("not a PNG image")]
-    NotPng,
+    #[error("not a PNG or JPEG image")]
+    UnsupportedImage,
     #[error("unknown device")]
     UnknownDevice,
     #[error("storage error: {0}")]
@@ -254,12 +253,11 @@ impl PhoneClient {
         self.send(mime::TEXT, text.into_bytes(), false)
     }
 
-    /// Sends a PNG image to every connected computer. Returns how many.
-    pub fn send_png(&self, png: Vec<u8>) -> Result<u32, PastegetError> {
-        if !png.starts_with(PNG_SIGNATURE) {
-            return Err(PastegetError::NotPng);
-        }
-        Ok(self.send(mime::PNG, png, false))
+    /// Sends a PNG or JPEG image, as it is, to every connected computer. Returns how many.
+    /// Other formats must be converted to PNG first.
+    pub fn send_image(&self, image: Vec<u8>) -> Result<u32, PastegetError> {
+        let mime_type = mime::of_image(&image).ok_or(PastegetError::UnsupportedImage)?;
+        Ok(self.send(mime_type, image, false))
     }
 }
 

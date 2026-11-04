@@ -17,7 +17,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{ExtendedColorType, ImageEncoder, ImageFormat, ImageReader, Limits};
+use image::metadata::Orientation;
+use image::{
+    DynamicImage, ExtendedColorType, ImageDecoder, ImageEncoder, ImageFormat, ImageReader, Limits,
+};
 use pasteget_core::clip::mime;
 use tokio::sync::mpsc as async_mpsc;
 
@@ -66,7 +69,7 @@ impl fmt::Debug for Raw {
     }
 }
 
-/// Clipboard content in wire form: UTF-8 text or PNG.
+/// Clipboard content in wire form: UTF-8 text, PNG or JPEG. Local copies are sent as PNG.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Content {
     pub mime_type: String,
@@ -93,7 +96,16 @@ impl Content {
             mime::TEXT => Ok(Raw::Text(
                 String::from_utf8(self.data.clone()).context("text is not UTF-8")?,
             )),
-            mime::PNG => Ok(Raw::Image(decode_png(&self.data, image_limits())?)),
+            mime::PNG => Ok(Raw::Image(decode_image(
+                &self.data,
+                ImageFormat::Png,
+                image_limits(),
+            )?)),
+            mime::JPEG => Ok(Raw::Image(decode_image(
+                &self.data,
+                ImageFormat::Jpeg,
+                image_limits(),
+            )?)),
             other => anyhow::bail!("unsupported type {other}"),
         }
     }
@@ -131,11 +143,17 @@ fn image_limits() -> Limits {
     limits
 }
 
-/// Decodes a PNG from a peer. `limits` stop small files that claim huge dimensions.
-fn decode_png(png: &[u8], limits: Limits) -> Result<RgbaImage> {
-    let mut reader = ImageReader::with_format(Cursor::new(png), ImageFormat::Png);
+/// Decodes an image from a peer, turned the right way up. `limits` stop small files that claim
+/// huge dimensions.
+fn decode_image(data: &[u8], format: ImageFormat, limits: Limits) -> Result<RgbaImage> {
+    let mut reader = ImageReader::with_format(Cursor::new(data), format);
     reader.limits(limits);
-    let image = reader.decode().context("invalid PNG")?.into_rgba8();
+    let mut decoder = reader.into_decoder().context("invalid image")?;
+    // Phone photos are often stored sideways, with an EXIF tag saying how to turn them.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder).context("invalid image")?;
+    image.apply_orientation(orientation);
+    let image = image.into_rgba8();
     Ok(RgbaImage {
         width: image.width(),
         height: image.height(),
@@ -419,7 +437,54 @@ mod tests {
         let mut limits = image_limits();
         limits.max_image_width = Some(3);
 
-        assert!(decode_png(&png, limits).is_err());
+        assert!(decode_image(&png, ImageFormat::Png, limits).is_err());
+    }
+
+    fn jpeg(width: u32, height: u32, exif: Option<Vec<u8>>) -> Content {
+        let pixels = vec![200; (width * height * 3) as usize];
+        let mut data = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new(&mut data);
+        if let Some(exif) = exif {
+            encoder.set_exif_metadata(exif).unwrap();
+        }
+        encoder
+            .write_image(&pixels, width, height, ExtendedColorType::Rgb8)
+            .unwrap();
+        Content {
+            mime_type: mime::JPEG.into(),
+            data,
+            sensitive: false,
+        }
+    }
+
+    #[test]
+    fn jpeg_from_a_phone_becomes_an_image() {
+        let Raw::Image(image) = jpeg(4, 2, None).to_raw().unwrap() else {
+            panic!("not an image");
+        };
+        assert_eq!((image.width, image.height), (4, 2));
+    }
+
+    #[test]
+    fn sideways_photos_are_turned_upright() {
+        // A little-endian TIFF block with one tag: orientation (0x0112) = 6, "rotate 90°".
+        let exif = vec![
+            0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x12, 0x01, 0x03, 0x00,
+            0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let Raw::Image(image) = jpeg(4, 2, Some(exif)).to_raw().unwrap() else {
+            panic!("not an image");
+        };
+        assert_eq!((image.width, image.height), (2, 4));
+    }
+
+    #[test]
+    fn a_png_labelled_jpeg_is_not_decoded_as_one() {
+        let mut content = Content::from_raw(Raw::Image(image(2, 2))).unwrap();
+        content.mime_type = mime::JPEG.into();
+
+        assert!(content.to_raw().is_err());
     }
 
     #[test]

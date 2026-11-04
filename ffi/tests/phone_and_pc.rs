@@ -26,6 +26,16 @@ const PNG_1X1: &[u8] = &[
     0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ];
 
+fn jpeg(width: u32, height: u32) -> Vec<u8> {
+    use image::ImageEncoder;
+    let pixels = vec![128; (width * height * 3) as usize];
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+        .write_image(&pixels, width, height, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    jpeg
+}
+
 #[derive(Default)]
 struct Recorder {
     connections: Mutex<Vec<bool>>,
@@ -126,13 +136,26 @@ fn phone_pairs_then_shares_text_and_screenshots_with_the_pc() {
     });
 
     // Share a screenshot: the PC clipboard holds the image.
-    assert_eq!(phone.send_png(PNG_1X1.to_vec()).unwrap(), 1);
+    assert_eq!(phone.send_image(PNG_1X1.to_vec()).unwrap(), 1);
     wait_until("the image on the PC clipboard", || {
         matches!(
             pc.clipboard.get(),
             Some(Raw::Image(RgbaImage {
                 width: 1,
                 height: 1,
+                ..
+            }))
+        )
+    });
+
+    // A JPEG screenshot is sent as it is, and decoded by the PC.
+    assert_eq!(phone.send_image(jpeg(3, 2)).unwrap(), 1);
+    wait_until("the JPEG on the PC clipboard", || {
+        matches!(
+            pc.clipboard.get(),
+            Some(Raw::Image(RgbaImage {
+                width: 3,
+                height: 2,
                 ..
             }))
         )
@@ -239,8 +262,8 @@ fn bad_input_is_refused() {
         Err(PastegetError::InvalidCode)
     ));
     assert!(matches!(
-        phone.send_png(b"GIF89a".to_vec()),
-        Err(PastegetError::NotPng)
+        phone.send_image(b"GIF89a".to_vec()),
+        Err(PastegetError::UnsupportedImage)
     ));
     assert_eq!(phone.send_text("nobody listening".into()), 0);
 }

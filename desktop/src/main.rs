@@ -191,12 +191,12 @@ async fn send(endpoint: &Endpoint, text: Option<String>, file: Option<PathBuf>) 
         (None, Some(path)) => {
             let data = std::fs::read(&path)
                 .with_context(|| format!("could not read {}", path.display()))?;
-            if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-                (mime::PNG, data)
+            if let Some(image) = mime::of_image(&data) {
+                (image, data)
             } else if std::str::from_utf8(&data).is_ok() {
                 (mime::TEXT, data)
             } else {
-                bail!("only UTF-8 text and PNG files can be sent for now");
+                bail!("only UTF-8 text, PNG and JPEG files can be sent for now");
             }
         }
         (None, None) => bail!("nothing to send"),
