@@ -30,11 +30,26 @@ class PasteGetApp : Application() {
         connectedIds.value = emptySet()
     }
 
+    private val lastDeliveryState = MutableStateFlow<LastDelivery?>(null)
+
+    /** The last clip a computer acknowledged, with how long it took. */
+    val lastDelivery: StateFlow<LastDelivery?> = lastDeliveryState.asStateFlow()
+
+    fun setLastDelivery(delivery: LastDelivery) {
+        lastDeliveryState.value = delivery
+    }
+
     /** The name the user gave the phone, e.g. "POCO M8 5G". */
     private fun deviceName(): String =
         Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
             ?: "${Build.MANUFACTURER} ${Build.MODEL}"
 }
+
+/**
+ * A clip a computer acknowledged. For a screenshot, [millis] counts from the moment Android
+ * announced the new file; otherwise from the moment it was sent.
+ */
+data class LastDelivery(val screenshot: Boolean, val bytes: Long, val millis: Long, val accepted: Boolean)
 
 val Context.pasteGet: PasteGetApp
     get() = applicationContext as PasteGetApp

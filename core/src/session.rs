@@ -7,13 +7,16 @@
 //! - a reader loop answering pings, reassembling clips and handing complete ones to
 //!   [`SessionEvents`]. [`IDLE_TIMEOUT`] of silence ends the session.
 //!
+//! Each clip sent is timed from the moment it was queued to the device's [`Ack`]: that is what
+//! [`SessionEvents::clip_delivered`] reports, to measure latency.
+//!
 //! [`Peers`] holds the outgoing queue of every connected device, so the app can send to all of
 //! them. What to do with received clips (clipboard, relay, notification) is up to the app.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -24,7 +27,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until, tim
 use crate::clip::{self, Clip, ClipReceiver, Received};
 use crate::identity::{DeviceId, Identity};
 use crate::proto::envelope::Payload;
-use crate::proto::{AckStatus, Envelope, Hello, Ping, Pong};
+use crate::proto::{Ack, AckStatus, Envelope, Hello, Ping, Pong};
 use crate::transport::{self, Connection, EnvelopeReader, EnvelopeWriter, TransportError};
 
 /// Time allowed for the TLS handshake, and separately for the Hello exchange.
@@ -38,6 +41,8 @@ pub const RECONNECT_MIN: Duration = Duration::from_secs(1);
 pub const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// Clips waiting to be written to one device. Beyond that, new clips skip that device.
 pub const OUTGOING_QUEUE: usize = 16;
+/// Sent clips still waiting for their [`Ack`]. Beyond that, the oldest is no longer timed.
+const AWAITING_ACK: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -65,6 +70,20 @@ pub trait SessionEvents: Send + Sync {
 
     /// A complete clip whose hash and type were verified.
     fn clip_received(&self, peer: DeviceId, clip: Clip);
+
+    /// `peer` acknowledged a clip this side sent.
+    fn clip_delivered(&self, _peer: DeviceId, _delivery: &Delivery) {}
+}
+
+/// A clip the device acknowledged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Delivery {
+    pub mime_type: String,
+    pub len: usize,
+    /// `Ok`, or why the device refused it.
+    pub status: AckStatus,
+    /// From the moment the clip was queued for this device to its acknowledgement.
+    pub elapsed: Duration,
 }
 
 /// The devices currently connected, and their outgoing queues.
@@ -82,9 +101,20 @@ struct PeerQueue {
 
 #[derive(Debug)]
 enum Outgoing {
-    Clip(Clip),
+    Clip { clip: Clip, queued_at: Instant },
     Envelope(Envelope),
 }
+
+/// A clip written to the device and not acknowledged yet.
+#[derive(Debug)]
+struct Sent {
+    mime_type: String,
+    len: usize,
+    queued_at: Instant,
+}
+
+/// Shared by a session's writer, which adds sent clips, and its reader, which matches acks.
+type AwaitingAck = Arc<Mutex<HashMap<Vec<u8>, Sent>>>;
 
 impl Peers {
     pub fn new() -> Self {
@@ -99,7 +129,11 @@ impl Peers {
             if Some(*id) == except {
                 continue;
             }
-            match queue.sender.try_send(Outgoing::Clip(clip.clone())) {
+            let outgoing = Outgoing::Clip {
+                clip: clip.clone(),
+                queued_at: Instant::now(),
+            };
+            match queue.sender.try_send(outgoing) {
                 Ok(()) => queued += 1,
                 Err(_) => tracing::warn!(peer = %id, "device is not keeping up, clip skipped"),
             }
@@ -154,17 +188,22 @@ where
         .map_err(|_| SessionError::Timeout("Hello exchange"))??;
     let (reader, writer) = connection.into_split();
     let (sender, queue) = mpsc::channel(OUTGOING_QUEUE);
+    let awaiting = AwaitingAck::default();
     let mut guard = SessionGuard {
         peers,
         events,
         peer,
         session: peers.register(peer, sender.clone()),
         was_current: None,
-        writer: Some(tokio::spawn(write_loop(writer, queue))),
+        writer: Some(tokio::spawn(write_loop(
+            writer,
+            queue,
+            Arc::clone(&awaiting),
+        ))),
     };
     events.connected(peer, &their_hello);
 
-    let result = read_loop(peer, reader, &sender, events).await;
+    let result = read_loop(peer, reader, &sender, &awaiting, events).await;
 
     // Graceful end: once no queue sender is left, the writer flushes and closes the connection.
     guard.unregister();
@@ -266,9 +305,12 @@ async fn read_loop<R: AsyncRead + Unpin>(
     peer: DeviceId,
     mut reader: EnvelopeReader<R>,
     replies: &mpsc::Sender<Outgoing>,
+    awaiting: &AwaitingAck,
     events: &dyn SessionEvents,
 ) -> Result<(), SessionError> {
     let mut receiver = ClipReceiver::default();
+    // When the offer of the clip being received arrived.
+    let mut offered_at = Instant::now();
     loop {
         let Some(envelope) = timeout(IDLE_TIMEOUT, reader.recv())
             .await
@@ -277,16 +319,17 @@ async fn read_loop<R: AsyncRead + Unpin>(
             return Ok(());
         };
         let received = match envelope.payload {
-            Some(Payload::ClipOffer(offer)) => receiver.on_offer(offer),
+            Some(Payload::ClipOffer(offer)) => {
+                offered_at = Instant::now();
+                receiver.on_offer(offer)
+            }
             Some(Payload::ClipChunk(chunk)) => receiver.on_chunk(chunk),
             Some(Payload::Ping(Ping { nonce })) => {
                 reply(replies, Payload::Pong(Pong { nonce })).await?;
                 continue;
             }
             Some(Payload::Ack(ack)) => {
-                if ack.status() != AckStatus::Ok {
-                    tracing::warn!(%peer, status = ?ack.status(), "device refused a clip");
-                }
+                acknowledged(peer, &ack, awaiting, events);
                 continue;
             }
             // Pongs only prove the peer is alive; unknown payloads come from newer peers.
@@ -303,11 +346,48 @@ async fn read_loop<R: AsyncRead + Unpin>(
             }
             Received::Clip { clip, ack } => {
                 reply(replies, Payload::Ack(ack)).await?;
-                tracing::info!(%peer, mime_type = %clip.mime_type, len = clip.data.len(), "clip received");
+                tracing::info!(
+                    %peer,
+                    mime_type = %clip.mime_type,
+                    len = clip.data.len(),
+                    ms = offered_at.elapsed().as_millis(),
+                    "clip received"
+                );
                 events.clip_received(peer, clip);
             }
         }
     }
+}
+
+/// Reports the delivery of the clip `ack` answers. Acks for unknown clips are ignored.
+fn acknowledged(peer: DeviceId, ack: &Ack, awaiting: &AwaitingAck, events: &dyn SessionEvents) {
+    let Some(sent) = lock(awaiting).remove(&ack.clip_id) else {
+        tracing::debug!(%peer, "ack for a clip that isn't waiting for one");
+        return;
+    };
+    let delivery = Delivery {
+        mime_type: sent.mime_type,
+        len: sent.len,
+        status: ack.status(),
+        elapsed: sent.queued_at.elapsed(),
+    };
+    if delivery.status == AckStatus::Ok {
+        tracing::info!(
+            %peer,
+            mime_type = %delivery.mime_type,
+            len = delivery.len,
+            ms = delivery.elapsed.as_millis(),
+            "clip delivered"
+        );
+    } else {
+        tracing::warn!(%peer, status = ?delivery.status, "device refused a clip");
+    }
+    events.clip_delivered(peer, &delivery);
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    // Poisoning means a panic elsewhere; the data is still consistent.
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 async fn reply(replies: &mpsc::Sender<Outgoing>, payload: Payload) -> Result<(), SessionError> {
@@ -319,9 +399,30 @@ async fn reply(replies: &mpsc::Sender<Outgoing>, payload: Payload) -> Result<(),
         .map_err(|_| SessionError::Closed)
 }
 
+fn await_ack(awaiting: &AwaitingAck, clip_id: Vec<u8>, clip: &Clip, queued_at: Instant) {
+    let mut awaiting = lock(awaiting);
+    if awaiting.len() >= AWAITING_ACK
+        && let Some(oldest) = awaiting
+            .iter()
+            .min_by_key(|(_, sent)| sent.queued_at)
+            .map(|(id, _)| id.clone())
+    {
+        awaiting.remove(&oldest);
+    }
+    awaiting.insert(
+        clip_id,
+        Sent {
+            mime_type: clip.mime_type.clone(),
+            len: clip.data.len(),
+            queued_at,
+        },
+    );
+}
+
 async fn write_loop<W: AsyncWrite + Unpin>(
     mut writer: EnvelopeWriter<W>,
     mut queue: mpsc::Receiver<Outgoing>,
+    awaiting: AwaitingAck,
 ) {
     let mut ping = interval(PING_INTERVAL);
     ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -332,10 +433,14 @@ async fn write_loop<W: AsyncWrite + Unpin>(
         loop {
             tokio::select! {
                 next = queue.recv() => match next {
-                    Some(Outgoing::Clip(clip)) => {
+                    Some(Outgoing::Clip { clip, queued_at }) => {
                         let envelopes = clip::outgoing(&clip)
                             .map_err(|_| SessionError::Protocol("no randomness for a clip ID"))?;
                         for envelope in envelopes {
+                            // Recorded before the offer leaves, so its ack can't come first.
+                            if let Some(Payload::ClipOffer(offer)) = &envelope.payload {
+                                await_ack(&awaiting, offer.clip_id.clone(), &clip, queued_at);
+                            }
                             writer.send(&envelope).await?;
                         }
                     }
@@ -371,6 +476,7 @@ mod tests {
         clips: Mutex<Vec<(DeviceId, Clip)>>,
         connected: Mutex<Vec<String>>,
         disconnected: Mutex<Vec<DeviceId>>,
+        deliveries: Mutex<Vec<(DeviceId, Delivery)>>,
     }
 
     impl SessionEvents for Recorder {
@@ -387,6 +493,13 @@ mod tests {
 
         fn clip_received(&self, peer: DeviceId, clip: Clip) {
             self.clips.lock().unwrap().push((peer, clip));
+        }
+
+        fn clip_delivered(&self, peer: DeviceId, delivery: &Delivery) {
+            self.deliveries
+                .lock()
+                .unwrap()
+                .push((peer, delivery.clone()));
         }
     }
 
@@ -450,6 +563,15 @@ mod tests {
             phone_events.clips.lock().unwrap()[0],
             (pc.device_id(), image)
         );
+
+        // Each sender hears that its clip was delivered, and how long it took.
+        until(|| !phone_events.deliveries.lock().unwrap().is_empty()).await;
+        let (to, delivery) = phone_events.deliveries.lock().unwrap()[0].clone();
+        assert_eq!(to, pc.device_id());
+        assert_eq!(delivery.mime_type, clip::mime::TEXT);
+        assert_eq!(delivery.len, "from the phone".len());
+        assert_eq!(delivery.status, AckStatus::Ok);
+        assert!(delivery.elapsed < Duration::from_secs(5));
 
         // When one side goes away, the other ends its session and forgets the device.
         phone_session.abort();

@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.format.Formatter
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -88,6 +89,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             PasteGetTheme {
                 val connected by pasteGet.connected.collectAsStateWithLifecycle()
+                val lastDelivery by pasteGet.lastDelivery.collectAsStateWithLifecycle()
                 HomeScreen(
                     deviceId = pasteGet.client.deviceId(),
                     computers = computers,
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     onPair = ::scan,
                     onSendClipboard = ::sendClipboard,
                     onForget = ::forget,
+                    lastDelivery = lastDelivery,
                     screenshots = screenshots,
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
@@ -234,6 +237,7 @@ private fun HomeScreen(
     onPair: () -> Unit,
     onSendClipboard: () -> Unit,
     onForget: (PairedComputer) -> Unit,
+    lastDelivery: LastDelivery?,
     screenshots: ScreenshotSetting,
     photoRequestDenied: Boolean,
     onScreenshotsChange: (Boolean) -> Unit,
@@ -273,6 +277,7 @@ private fun HomeScreen(
         message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
         ScreenshotsCard(screenshots, photoRequestDenied, onScreenshotsChange, onOpenSettings)
+        lastDelivery?.let { LastDeliveryText(it) }
 
         if (computers.isNotEmpty()) {
             Text(stringResource(R.string.paired_computers), style = MaterialTheme.typography.titleSmall)
@@ -336,4 +341,17 @@ private fun ScreenshotsCard(
             }
         }
     }
+}
+
+/** How long the last clip took to reach a computer: the latency the roadmap aims to keep under a second. */
+@Composable
+private fun LastDeliveryText(delivery: LastDelivery) {
+    val text = if (delivery.accepted) {
+        val size = Formatter.formatShortFileSize(LocalContext.current, delivery.bytes)
+        val format = if (delivery.screenshot) R.string.last_screenshot else R.string.last_send
+        stringResource(format, size, delivery.millis)
+    } else {
+        stringResource(R.string.last_refused)
+    }
+    Text(text, style = MaterialTheme.typography.bodySmall)
 }

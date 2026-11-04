@@ -6,6 +6,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.database.ContentObserver
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -18,8 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Watches MediaStore for new screenshots and hands each one, once fully written, to [onScreenshot].
- * Needs full access to photos (see [PhotoAccess]).
+ * Watches MediaStore for new screenshots and hands each one, once fully written, to [onScreenshot]
+ * with the [SystemClock.elapsedRealtime] at which MediaStore announced it. Needs full access to
+ * photos (see [PhotoAccess]).
  *
  * Screenshot apps either insert a pending entry (`IS_PENDING = 1`), write it and publish it, or
  * write a file that MediaStore picks up. Queries only return published entries; a file that is
@@ -28,13 +30,13 @@ import kotlinx.coroutines.launch
  */
 class ScreenshotWatcher(
     context: Context,
-    private val onScreenshot: suspend (image: ByteArray, foundAtMs: Long) -> Unit,
+    private val onScreenshot: suspend (image: ByteArray, announcedAtMs: Long) -> Unit,
 ) {
     private val resolver = context.contentResolver
     private val changes = Channel<Long>(Channel.CONFLATED)
     private val observer = object : ContentObserver(null) {
         override fun onChange(selfChange: Boolean) {
-            changes.trySend(System.currentTimeMillis())
+            changes.trySend(SystemClock.elapsedRealtime())
         }
     }
     private var scope: CoroutineScope? = null

@@ -26,8 +26,8 @@ use pasteget_core::clip::{Clip, mime};
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, sanitize_device_name};
-use pasteget_core::proto::{Hello, PROTOCOL_VERSION, Platform};
-use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, SessionEvents};
+use pasteget_core::proto::{AckStatus, Hello, PROTOCOL_VERSION, Platform};
+use pasteget_core::session::{self, Delivery, HANDSHAKE_TIMEOUT, Peers, SessionEvents};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
@@ -74,6 +74,18 @@ pub struct PairedComputer {
     pub addresses: Vec<String>,
 }
 
+/// A clip a computer acknowledged.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ClipDelivery {
+    pub device_id: String,
+    pub mime_type: String,
+    pub size: u64,
+    /// From sending to the computer's acknowledgement.
+    pub millis: u64,
+    /// `false` if the computer refused it (too large, unsupported type…).
+    pub accepted: bool,
+}
+
 /// Implemented by the app to hear what happens. Called from background threads.
 #[uniffi::export(with_foreign)]
 pub trait PhoneListener: Send + Sync {
@@ -81,6 +93,9 @@ pub trait PhoneListener: Send + Sync {
 
     /// A clip arrived from a computer. `sensitive` clips must stay out of history.
     fn on_clip_received(&self, mime_type: String, data: Vec<u8>, sensitive: bool);
+
+    /// A computer acknowledged a clip sent with `send_text` or `send_image`.
+    fn on_clip_delivered(&self, delivery: ClipDelivery);
 }
 
 #[derive(uniffi::Object)]
@@ -358,6 +373,18 @@ impl SessionEvents for State {
         }
         if let Some(listener) = self.listener() {
             listener.on_clip_received(clip.mime_type, clip.data, clip.sensitive);
+        }
+    }
+
+    fn clip_delivered(&self, peer: DeviceId, delivery: &Delivery) {
+        if let Some(listener) = self.listener() {
+            listener.on_clip_delivered(ClipDelivery {
+                device_id: peer.to_string(),
+                mime_type: delivery.mime_type.clone(),
+                size: delivery.len as u64,
+                millis: u64::try_from(delivery.elapsed.as_millis()).unwrap_or(u64::MAX),
+                accepted: delivery.status == AckStatus::Ok,
+            });
         }
     }
 }

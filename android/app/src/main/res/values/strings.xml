@@ -36,4 +36,7 @@
     <string name="screenshots_partial">paste-get only sees the photos you picked. Allow all photos to see new screenshots.</string>
     <string name="screenshots_denied">paste-get needs access to your photos to see new screenshots.</string>
     <string name="open_settings">Open settings</string>
+    <string name="last_screenshot">Last screenshot (%1$s) reached your computer in %2$d ms</string>
+    <string name="last_send">Last send (%1$s) reached your computer in %2$d ms</string>
+    <string name="last_refused">Your computer refused the last clip</string>
 </resources>

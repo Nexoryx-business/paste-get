@@ -15,7 +15,7 @@ use pasteget_core::identity::Identity;
 use pasteget_desktop::clipboard::{Content, MemoryClipboard, Raw, RgbaImage};
 use pasteget_desktop::config::Profile;
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
-use pasteget_ffi::{PastegetError, PhoneClient, PhoneListener};
+use pasteget_ffi::{ClipDelivery, PastegetError, PhoneClient, PhoneListener};
 
 /// A real 1×1 PNG.
 const PNG_1X1: &[u8] = &[
@@ -40,6 +40,7 @@ fn jpeg(width: u32, height: u32) -> Vec<u8> {
 struct Recorder {
     connections: Mutex<Vec<bool>>,
     clips: Mutex<Vec<(String, Vec<u8>)>>,
+    deliveries: Mutex<Vec<ClipDelivery>>,
 }
 
 impl PhoneListener for Recorder {
@@ -49,6 +50,10 @@ impl PhoneListener for Recorder {
 
     fn on_clip_received(&self, mime_type: String, data: Vec<u8>, _sensitive: bool) {
         self.clips.lock().unwrap().push((mime_type, data));
+    }
+
+    fn on_clip_delivered(&self, delivery: ClipDelivery) {
+        self.deliveries.lock().unwrap().push(delivery);
     }
 }
 
@@ -251,6 +256,42 @@ fn a_computer_found_at_a_new_address_is_reconnected() {
     );
     let stranger = Identity::generate().unwrap().device_id().to_string();
     assert!(!phone.computer_found(stranger, vec!["127.0.0.1".into()], 1));
+}
+
+/// Roadmap M4: a screenshot reaches the PC in under a second on a LAN. Loopback is faster than
+/// Wi-Fi, so this measures the software's own share: TLS, hashing, chunking and the session.
+#[test]
+fn a_screenshot_sized_image_is_delivered_in_under_a_second() {
+    let pc = start_pc();
+    let qr_code = pc
+        .runtime
+        .block_on(pc.daemon.open_pairing())
+        .unwrap()
+        .to_uri();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let phone = PhoneClient::new(path_of(&phone_dir), "POCO".into()).unwrap();
+    let computer = phone.pair(qr_code).unwrap();
+    let listener = Arc::new(Recorder::default());
+    phone.start(listener.clone());
+    wait_until("the connection", || phone.connected_count() == 1);
+
+    // A HyperOS screenshot is a JPEG of about 1 MB; take 2 MB. The PC acknowledges it before
+    // decoding it, so its content doesn't matter here.
+    let mut screenshot = vec![0xff, 0xd8, 0xff, 0xe0];
+    screenshot.extend((0..2_000_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8));
+    let size = screenshot.len() as u64;
+    assert_eq!(phone.send_image(screenshot).unwrap(), 1);
+
+    wait_until("the delivery", || {
+        !listener.deliveries.lock().unwrap().is_empty()
+    });
+    let delivery = listener.deliveries.lock().unwrap()[0].clone();
+    println!("{size} bytes delivered in {} ms", delivery.millis);
+    assert_eq!(delivery.device_id, computer.device_id);
+    assert_eq!(delivery.mime_type, mime::JPEG);
+    assert_eq!(delivery.size, size);
+    assert!(delivery.accepted);
+    assert!(delivery.millis < 1000, "took {} ms", delivery.millis);
 }
 
 #[test]

@@ -15,10 +15,12 @@ import android.net.Network
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import uniffi.pasteget_ffi.ClipDelivery
 import uniffi.pasteget_ffi.PhoneListener
 
 /**
@@ -50,7 +52,26 @@ class SyncService : Service() {
         override fun onClipReceived(mimeType: String, data: ByteArray, sensitive: Boolean) {
             ReceivedClips.apply(applicationContext, mimeType, data, sensitive)
         }
+
+        override fun onClipDelivered(delivery: ClipDelivery) {
+            val size = delivery.size.toLong()
+            val screenshot = lastScreenshot?.takeIf { delivery.mimeType.startsWith("image/") && it.size == size }
+            val millis = screenshot?.let { SystemClock.elapsedRealtime() - it.announcedAtMs } ?: delivery.millis.toLong()
+            Log.i(
+                TAG,
+                "${delivery.mimeType}, $size bytes: delivered ${delivery.millis} ms after sending" +
+                    (screenshot?.let { ", $millis ms after Android announced the screenshot" } ?: "") +
+                    if (delivery.accepted) "" else ", refused",
+            )
+            pasteGet.setLastDelivery(LastDelivery(screenshot != null, size, millis, delivery.accepted))
+        }
     }
+
+    /** The last screenshot sent, to time it from its announcement to the computer's ack. */
+    private class SentScreenshot(val size: Long, val announcedAtMs: Long)
+
+    @Volatile
+    private var lastScreenshot: SentScreenshot? = null
 
     /** On a new network, computers are dialed right away instead of after their backoff. */
     private val network = object : ConnectivityManager.NetworkCallback() {
@@ -74,7 +95,7 @@ class SyncService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
         )
         finder = ComputerFinder(this, pasteGet.client)
-        screenshots = ScreenshotWatcher(this) { image, _ -> sendScreenshot(image) }
+        screenshots = ScreenshotWatcher(this, ::sendScreenshot)
         running = true
         pasteGet.client.start(listener)
         getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
@@ -139,10 +160,12 @@ class SyncService : Service() {
     }
 
     /** Runs on a background thread. Never logs contents: size only. */
-    private fun sendScreenshot(image: ByteArray) {
+    private fun sendScreenshot(image: ByteArray, announcedAtMs: Long) {
         val sendable = Sender.sendable(image)
+        lastScreenshot = SentScreenshot(sendable.size.toLong(), announcedAtMs)
         val sentTo = pasteGet.client.sendImage(sendable).toInt()
-        Log.i(TAG, "screenshot of ${sendable.size} bytes sent to $sentTo computers")
+        val readMs = SystemClock.elapsedRealtime() - announcedAtMs
+        Log.i(TAG, "screenshot of ${sendable.size} bytes read in $readMs ms, sent to $sentTo computers")
     }
 
     private fun updateNotification() {
