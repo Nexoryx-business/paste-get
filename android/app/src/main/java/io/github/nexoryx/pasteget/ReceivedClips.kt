@@ -24,10 +24,6 @@ import java.util.concurrent.Executors
 object ReceivedClips {
     private const val TAG = "paste-get"
 
-    // Constants added in API 33, with the same string values on older versions.
-    private const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
-    private const val EXTRA_IS_REMOTE_DEVICE = "android.content.extra.IS_REMOTE_DEVICE"
-
     /** Clips are applied one at a time, in order, and off the client's threads, which must not wait. */
     private val worker = Executors.newSingleThreadExecutor()
 
@@ -55,8 +51,8 @@ object ReceivedClips {
             return
         }
         clip.description.extras = PersistableBundle().apply {
-            putBoolean(EXTRA_IS_REMOTE_DEVICE, true)
-            if (sensitive) putBoolean(EXTRA_IS_SENSITIVE, true)
+            putBoolean(CopiedText.EXTRA_IS_REMOTE_DEVICE, true)
+            if (sensitive) putBoolean(CopiedText.EXTRA_IS_SENSITIVE, true)
         }
         try {
             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)

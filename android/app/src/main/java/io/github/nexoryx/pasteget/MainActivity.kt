@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.format.DateFormat
 import android.text.format.Formatter
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -49,6 +50,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
@@ -58,12 +60,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.pasteget_ffi.PairedComputer
 import uniffi.pasteget_ffi.PastegetException
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     private var computers by mutableStateOf(emptyList<PairedComputer>())
     private var message by mutableStateOf<String?>(null)
     private var screenshots by mutableStateOf(ScreenshotSetting(wanted = false, access = PhotoAccess.NONE))
     private var photoRequestDenied by mutableStateOf(false)
+    private var copiesOn by mutableStateOf(false)
 
     private val photoPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -90,6 +94,8 @@ class MainActivity : ComponentActivity() {
             PasteGetTheme {
                 val connected by pasteGet.connected.collectAsStateWithLifecycle()
                 val lastDelivery by pasteGet.lastDelivery.collectAsStateWithLifecycle()
+                val shizuku by pasteGet.autoCopy.shizuku.state.collectAsStateWithLifecycle()
+                val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
                 HomeScreen(
                     deviceId = pasteGet.client.deviceId(),
                     computers = computers,
@@ -103,6 +109,13 @@ class MainActivity : ComponentActivity() {
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
                     onOpenSettings = ::openAppSettings,
+                    autoCopy = AutoCopyCardState(copiesOn, shizuku, lastCopy),
+                    autoCopyActions = AutoCopyActions(
+                        onChange = ::setSendCopies,
+                        onAllowShizuku = pasteGet.autoCopy.shizuku::requestPermission,
+                        onOpenShizuku = ::openShizuku,
+                        onGetShizuku = ::getShizuku,
+                    ),
                 )
             }
         }
@@ -114,6 +127,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshScreenshots()
+        copiesOn = Preferences.sendCopies(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -195,6 +209,21 @@ class MainActivity : ComponentActivity() {
         SyncService.start(this)
     }
 
+    private fun setSendCopies(on: Boolean) {
+        Preferences.setSendCopies(this, on)
+        copiesOn = on
+        // The service picks up the change.
+        SyncService.start(this)
+    }
+
+    private fun openShizuku() {
+        packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)?.let(::startActivity)
+    }
+
+    private fun getShizuku() {
+        startActivity(Intent(Intent.ACTION_VIEW, SHIZUKU_DOWNLOAD.toUri()))
+    }
+
     private fun openAppSettings() {
         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
     }
@@ -203,6 +232,11 @@ class MainActivity : ComponentActivity() {
     private fun sendClipboard() {
         val clip = getSystemService(ClipboardManager::class.java).primaryClip
         lifecycleScope.launch { message = Sender.send(this@MainActivity, clip) }
+    }
+
+    private companion object {
+        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        const val SHIZUKU_DOWNLOAD = "https://shizuku.rikka.app/download/"
     }
 }
 
@@ -242,6 +276,8 @@ private fun HomeScreen(
     photoRequestDenied: Boolean,
     onScreenshotsChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    autoCopy: AutoCopyCardState,
+    autoCopyActions: AutoCopyActions,
 ) {
     Column(
         modifier = Modifier
@@ -278,6 +314,7 @@ private fun HomeScreen(
 
         ScreenshotsCard(screenshots, photoRequestDenied, onScreenshotsChange, onOpenSettings)
         lastDelivery?.let { LastDeliveryText(it) }
+        AutoCopyCard(autoCopy, autoCopyActions)
 
         if (computers.isNotEmpty()) {
             Text(stringResource(R.string.paired_computers), style = MaterialTheme.typography.titleSmall)
@@ -354,4 +391,76 @@ private fun LastDeliveryText(delivery: LastDelivery) {
         stringResource(R.string.last_refused)
     }
     Text(text, style = MaterialTheme.typography.bodySmall)
+}
+
+/** What the automatic copy card shows. */
+private data class AutoCopyCardState(val on: Boolean, val shizuku: ShizukuState, val lastCopy: LastCopy?)
+
+private class AutoCopyActions(
+    val onChange: (Boolean) -> Unit,
+    val onAllowShizuku: () -> Unit,
+    val onOpenShizuku: () -> Unit,
+    val onGetShizuku: () -> Unit,
+)
+
+/** The automatic copy: on or off, how it works right now, and what to do if it doesn't. */
+@Composable
+private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.copies_title), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(
+                            when {
+                                !state.on -> R.string.copies_off
+                                state.shizuku.status == ShizukuStatus.WATCHING -> R.string.copies_on
+                                else -> R.string.copies_waiting
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = state.on, onCheckedChange = actions.onChange)
+            }
+            if (state.on) {
+                ShizukuLine(state.shizuku, actions)
+                state.lastCopy?.let { LastCopyText(it) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShizukuLine(shizuku: ShizukuState, actions: AutoCopyActions) {
+    val text = when (shizuku.status) {
+        ShizukuStatus.OFF, ShizukuStatus.CONNECTING -> stringResource(R.string.shizuku_connecting)
+        ShizukuStatus.NOT_INSTALLED -> stringResource(R.string.shizuku_not_installed)
+        ShizukuStatus.NOT_RUNNING -> stringResource(R.string.shizuku_not_running)
+        ShizukuStatus.NO_PERMISSION -> stringResource(R.string.shizuku_no_permission)
+        ShizukuStatus.WATCHING -> stringResource(R.string.shizuku_watching, shizuku.detail.orEmpty())
+        ShizukuStatus.FAILED -> stringResource(R.string.shizuku_failed, shizuku.detail.orEmpty())
+    }
+    Text(text, style = MaterialTheme.typography.bodySmall)
+    when (shizuku.status) {
+        ShizukuStatus.NOT_INSTALLED ->
+            TextButton(onClick = actions.onGetShizuku) { Text(stringResource(R.string.shizuku_get)) }
+        ShizukuStatus.NOT_RUNNING ->
+            TextButton(onClick = actions.onOpenShizuku) { Text(stringResource(R.string.shizuku_open)) }
+        ShizukuStatus.NO_PERMISSION ->
+            TextButton(onClick = actions.onAllowShizuku) { Text(stringResource(R.string.shizuku_allow)) }
+        else -> {}
+    }
+}
+
+@Composable
+private fun LastCopyText(copy: LastCopy) {
+    val context = LocalContext.current
+    val size = Formatter.formatShortFileSize(context, copy.bytes.toLong())
+    val time = DateFormat.getTimeFormat(context).format(Date(copy.atMillis))
+    Text(
+        pluralStringResource(R.plurals.last_copy, copy.sentTo, size, time, copy.sentTo),
+        style = MaterialTheme.typography.bodySmall,
+    )
 }

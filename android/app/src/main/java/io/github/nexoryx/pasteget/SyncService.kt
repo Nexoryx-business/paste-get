@@ -28,7 +28,8 @@ import uniffi.pasteget_ffi.PhoneListener
  *
  * A `connectedDevice` foreground service: unlike `dataSync`, Android 15 doesn't cap its running
  * time. Its notification shows how many computers are connected. While one of them isn't, it
- * looks for it on the local network. When the user turned it on, it also sends new screenshots.
+ * looks for it on the local network. When the user turned them on, it also sends new screenshots
+ * and what they copy ([AutoCopy]).
  */
 class SyncService : Service() {
     private val main = Handler(Looper.getMainLooper())
@@ -105,6 +106,7 @@ class SyncService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         updateFinder()
         updateScreenshots()
+        updateAutoCopy()
         return START_STICKY
     }
 
@@ -113,6 +115,7 @@ class SyncService : Service() {
         getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network)
         finder.setActive(false)
         screenshots.stop()
+        pasteGet.autoCopy.stop()
         main.removeCallbacksAndMessages(null)
         pasteGet.client.stop()
         pasteGet.clearConnected()
@@ -157,6 +160,10 @@ class SyncService : Service() {
         } else {
             screenshots.stop()
         }
+    }
+
+    private fun updateAutoCopy() {
+        if (Preferences.sendCopies(this)) pasteGet.autoCopy.start() else pasteGet.autoCopy.stop()
     }
 
     /** Runs on a background thread. Never logs contents: size only. */

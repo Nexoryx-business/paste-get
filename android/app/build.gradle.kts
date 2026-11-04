@@ -55,10 +55,19 @@ android {
 
     buildFeatures {
         compose = true
+        // IShellClipboard: the app talks to its Shizuku service through AIDL.
+        aidl = true
     }
 
     lint {
         warningsAsErrors = true
+    }
+
+    testOptions {
+        // Robolectric tests run against the app's real resources and merged manifest.
+        unitTests.isIncludeAndroidResources = true
+        // Robolectric's Android 16 reaches into file descriptors, which JDK 17+ closes off.
+        unitTests.all { it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED") }
     }
 }
 
@@ -72,10 +81,15 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.zxing.embedded)
+    // Shizuku (MIT): runs ShellClipboardService as the shell user, for the automatic copy.
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
     // The generated bindings call the Rust library through JNA.
     implementation(libs.jna) { artifact { type = "aar" } }
 
     testImplementation(libs.junit)
+    // Android framework classes on the JVM, for tests of code that uses them (MIT).
+    testImplementation(libs.robolectric)
 }
 
 // --- Rust core -------------------------------------------------------------------------------

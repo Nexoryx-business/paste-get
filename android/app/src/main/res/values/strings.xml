@@ -39,4 +39,21 @@
     <string name="last_screenshot">Last screenshot (%1$s) reached your computer in %2$d ms</string>
     <string name="last_send">Last send (%1$s) reached your computer in %2$d ms</string>
     <string name="last_refused">Your computer refused the last clip</string>
+    <string name="copies_title">Send what you copy</string>
+    <string name="copies_off">Copy on the phone, paste on your computer, no tap</string>
+    <string name="copies_on">Each copy goes to your computers\' clipboard</string>
+    <string name="copies_waiting">Not yet: see below</string>
+    <string name="shizuku_connecting">Connecting to Shizuku…</string>
+    <string name="shizuku_not_installed">Android only lets the app in front read the clipboard. paste-get reads it through Shizuku, a free app that lends it the rights of the shell.</string>
+    <string name="shizuku_not_running">Shizuku isn\'t running. Start it again after each restart of the phone.</string>
+    <string name="shizuku_no_permission">Shizuku is running. Allow paste-get to use it.</string>
+    <string name="shizuku_watching">Shizuku: watching the clipboard as %s</string>
+    <string name="shizuku_failed">Shizuku can\'t watch the clipboard on this phone: %s</string>
+    <string name="shizuku_get">Get Shizuku</string>
+    <string name="shizuku_open">Open Shizuku</string>
+    <string name="shizuku_allow">Allow in Shizuku</string>
+    <plurals name="last_copy">
+        <item quantity="one">Last copy (%1$s) sent at %2$s to %3$d computer</item>
+        <item quantity="other">Last copy (%1$s) sent at %2$s to %3$d computers</item>
+    </plurals>
 </resources>

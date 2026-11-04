@@ -17,6 +17,9 @@ class PasteGetApp : Application() {
     /** Identity and pairings live in the app's private files directory. */
     val client: PhoneClient by lazy { PhoneClient(filesDir.absolutePath, deviceName()) }
 
+    /** Started and stopped by [SyncService], shown by the home screen. */
+    val autoCopy: AutoCopy by lazy { AutoCopy(this) }
+
     private val connectedIds = MutableStateFlow<Set<String>>(emptySet())
 
     /** Device IDs of the computers connected right now. */
