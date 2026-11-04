@@ -46,6 +46,26 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The release key never enters the repository: CI decodes it from a secret and passes
+        // its path and passwords in the environment (docs/RELEASING.md). Without them, release
+        // builds come out unsigned.
+        val keystore = System.getenv("PASTEGET_KEYSTORE")
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("PASTEGET_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PASTEGET_KEY_ALIAS")
+                keyPassword = System.getenv("PASTEGET_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
+            // No shrinking: JNA and the generated bindings find their classes by name.
+            isMinifyEnabled = false
+        }
     }
 
     compileOptions {

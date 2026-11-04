@@ -90,6 +90,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
     a draft release for each `v*` tag (`RELEASING.md`)
   - [x] AUR `paste-get-git` PKGBUILD, built with `makepkg` in an Arch container by CI (publishing
     it on the AUR needs a maintainer account)
+  - [x] Release APK, signed in CI with a key kept in repository secrets (creating the key and
+    the secrets is a one-time step for the maintainer, `RELEASING.md`)
 - [ ] README demo GIF, `SECURITY.md` draft
 - [ ] Human review of crypto and protocol code
 

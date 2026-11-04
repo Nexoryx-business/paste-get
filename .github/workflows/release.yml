@@ -69,6 +69,64 @@ jobs:
           path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    env:
+      # Secrets can't be tested in `if:` directly.
+      HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android,x86_64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install cargo-ndk and the Android SDK packages
+        run: |
+          cargo install cargo-ndk --locked
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.2" "build-tools;36.0.0" "ndk;30.0.16248370" > /dev/null
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Refuse to release an unsigned APK
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_KEY != 'true'
+        run: |
+          echo "::error::The ANDROID_KEYSTORE_BASE64 secret is missing: see docs/RELEASING.md"
+          exit 1
+      - name: Decode the release key
+        if: env.HAS_KEY == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "PASTEGET_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Build the release APK
+        working-directory: android
+        env:
+          PASTEGET_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PASTEGET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          PASTEGET_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleFossRelease
+      - name: Check the signature and name the APK
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          mkdir dist
+          cd android/app/build/outputs/apk/foss/release
+          if [ "$HAS_KEY" = true ]; then
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app-foss-release.apk
+            cp app-foss-release.apk "$GITHUB_WORKSPACE/dist/paste-get_${version}_foss.apk"
+          else
+            cp app-foss-release-unsigned.apk "$GITHUB_WORKSPACE/dist/paste-get_${version}_foss-unsigned.apk"
+          fi
+          rm -f "$RUNNER_TEMP/release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.apk
+          if-no-files-found: error
+
   aur:
     name: AUR package (makepkg on Arch)
     runs-on: ubuntu-latest
@@ -101,7 +159,7 @@ jobs:
   release:
     name: Draft the GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    needs: [windows, linux, android, aur]
     runs-on: ubuntu-latest
     permissions:
       contents: write
