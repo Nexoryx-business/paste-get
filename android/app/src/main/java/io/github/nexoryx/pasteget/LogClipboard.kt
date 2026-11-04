@@ -10,11 +10,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -65,7 +67,18 @@ class LogClipboard(
 
     private val main = Handler(Looper.getMainLooper())
     private val clipboard = context.getSystemService(ClipboardManager::class.java)
-    private val windows = context.getSystemService(WindowManager::class.java)
+
+    /** Windows over other apps belong to a window context (Android 11+), not to the application. */
+    private val windowContext: Context by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+            context.createDisplayContext(display)
+                .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+        } else {
+            context
+        }
+    }
+    private val windows: WindowManager by lazy { windowContext.getSystemService(WindowManager::class.java) }
     private val notifications = context.getSystemService(NotificationManager::class.java)
     private val worker = Executors.newSingleThreadExecutor()
 
@@ -169,7 +182,7 @@ class LogClipboard(
     private fun readThroughOverlay() {
         // A clip paste-get just put there itself (from a computer) isn't worth stealing focus for.
         if (overlay != null || ReceivedClips.justApplied()) return
-        val view = object : View(context) {
+        val view = object : View(windowContext) {
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
                 if (hasWindowFocus) {

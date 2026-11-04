@@ -82,6 +82,8 @@ class ShizukuClipboard(
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            // Turned off while Shizuku was starting the service: end it.
+            if (!started) return unbind()
             val connected = IShellClipboard.Stub.asInterface(binder ?: return)
             worker.execute { watch(connected) }
         }
@@ -120,11 +122,14 @@ class ShizukuClipboard(
         Shizuku.removeBinderReceivedListener(binderReceived)
         Shizuku.removeBinderDeadListener(binderDead)
         Shizuku.removeRequestPermissionResultListener(permissionResult)
-        if (service != null && Shizuku.pingBinder()) {
-            runCatching { Shizuku.unbindUserService(serviceArgs, connection, true) }
-        }
+        unbind()
         service = null
         set(ShizukuStatus.OFF)
+    }
+
+    /** Ends the service, if Shizuku runs it. */
+    private fun unbind() {
+        if (Shizuku.pingBinder()) runCatching { Shizuku.unbindUserService(serviceArgs, connection, true) }
     }
 
     /**
