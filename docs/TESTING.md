@@ -25,6 +25,13 @@ Logs never contain clipboard contents (only types and sizes), so they're safe to
    ```
 3. The program is `target\release\pasteget.exe`. Below, `pasteget` means that file.
 
+If the build stops with "An Application Control policy has blocked this file" (os error 4551),
+Windows 11's **Smart App Control** is blocking the small programs Cargo compiles and runs during
+the build, and it would block `pasteget.exe` too, since it isn't signed yet. Turn it off in
+Windows Security → App & browser control → Smart App Control settings → Off, then build again.
+On most Windows 11 versions it can't be turned back on without resetting Windows; if you'd rather
+keep it, test on Arch instead.
+
 ### Arch Linux (KDE Plasma or Hyprland)
 ```sh
 sudo pacman -S --needed rustup git base-devel
