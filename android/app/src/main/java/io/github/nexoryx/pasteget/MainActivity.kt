@@ -6,8 +6,10 @@ import android.Manifest
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -58,6 +61,15 @@ import uniffi.pasteget_ffi.PastegetException
 class MainActivity : ComponentActivity() {
     private var computers by mutableStateOf(emptyList<PairedComputer>())
     private var message by mutableStateOf<String?>(null)
+    private var screenshots by mutableStateOf(ScreenshotSetting(wanted = false, access = PhotoAccess.NONE))
+    private var photoRequestDenied by mutableStateOf(false)
+
+    private val photoPermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            val granted = PhotoAccess.of(this) == PhotoAccess.FULL
+            photoRequestDenied = !granted
+            setSendScreenshots(granted)
+        }
 
     private val scanner = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let(::pair)
@@ -84,11 +96,21 @@ class MainActivity : ComponentActivity() {
                     onPair = ::scan,
                     onSendClipboard = ::sendClipboard,
                     onForget = ::forget,
+                    screenshots = screenshots,
+                    photoRequestDenied = photoRequestDenied,
+                    onScreenshotsChange = ::toggleScreenshots,
+                    onOpenSettings = ::openAppSettings,
                 )
             }
         }
         startSyncService()
         handlePairingLink(intent)
+    }
+
+    /** Photo access may have changed in the system settings meanwhile. */
+    override fun onResume() {
+        super.onResume()
+        refreshScreenshots()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -151,6 +173,29 @@ class MainActivity : ComponentActivity() {
         computers = pasteGet.client.pairedComputers()
     }
 
+    private fun refreshScreenshots() {
+        screenshots = ScreenshotSetting(Preferences.sendScreenshots(this), PhotoAccess.of(this))
+    }
+
+    private fun toggleScreenshots(on: Boolean) {
+        if (on && PhotoAccess.of(this) != PhotoAccess.FULL) {
+            photoPermission.launch(PhotoAccess.permissions())
+        } else {
+            setSendScreenshots(on)
+        }
+    }
+
+    private fun setSendScreenshots(on: Boolean) {
+        Preferences.setSendScreenshots(this, on)
+        refreshScreenshots()
+        // The service picks up the change.
+        SyncService.start(this)
+    }
+
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+    }
+
     /** This activity has focus, so it may read the clipboard directly. */
     private fun sendClipboard() {
         val clip = getSystemService(ClipboardManager::class.java).primaryClip
@@ -174,6 +219,12 @@ private fun PasteGetTheme(content: @Composable () -> Unit) {
     }
 }
 
+/** Whether the user wants screenshots sent, and whether the app can see them. */
+private data class ScreenshotSetting(val wanted: Boolean, val access: PhotoAccess) {
+    val on: Boolean
+        get() = wanted && access == PhotoAccess.FULL
+}
+
 @Composable
 private fun HomeScreen(
     deviceId: String,
@@ -183,6 +234,10 @@ private fun HomeScreen(
     onPair: () -> Unit,
     onSendClipboard: () -> Unit,
     onForget: (PairedComputer) -> Unit,
+    screenshots: ScreenshotSetting,
+    photoRequestDenied: Boolean,
+    onScreenshotsChange: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -217,6 +272,8 @@ private fun HomeScreen(
         }
         message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
+        ScreenshotsCard(screenshots, photoRequestDenied, onScreenshotsChange, onOpenSettings)
+
         if (computers.isNotEmpty()) {
             Text(stringResource(R.string.paired_computers), style = MaterialTheme.typography.titleSmall)
         }
@@ -246,5 +303,37 @@ private fun HomeScreen(
             text = stringResource(R.string.this_phone, deviceId.take(12)),
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+private fun ScreenshotsCard(
+    setting: ScreenshotSetting,
+    photoRequestDenied: Boolean,
+    onChange: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val problem = when {
+        setting.access == PhotoAccess.PARTIAL -> R.string.screenshots_partial
+        setting.access == PhotoAccess.NONE && (setting.wanted || photoRequestDenied) -> R.string.screenshots_denied
+        else -> null
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.screenshots_title), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(if (setting.on) R.string.screenshots_on else R.string.screenshots_off),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = setting.on, onCheckedChange = onChange)
+            }
+            if (problem != null) {
+                Text(stringResource(problem), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.open_settings)) }
+            }
+        }
     }
 }

@@ -45,7 +45,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 
 ### M4 — Screenshots
 - [x] Phone finds its computers again by mDNS when their address changes
-- [ ] MediaStore observer, screenshot folder detection, `IS_PENDING` handling
+- [x] MediaStore observer, screenshot folder detection, `IS_PENDING` handling
 - [ ] Send PNG; the PC sets it as an image and shows a "Received ✓" notification
 - [ ] Measure latency (target < 1 s on LAN)
 - **Done when:** screenshot on the POCO → `Ctrl+V` in Discord works on Windows and Arch.

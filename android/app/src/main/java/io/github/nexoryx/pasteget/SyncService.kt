@@ -15,6 +15,7 @@ import android.net.Network
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -25,11 +26,12 @@ import uniffi.pasteget_ffi.PhoneListener
  *
  * A `connectedDevice` foreground service: unlike `dataSync`, Android 15 doesn't cap its running
  * time. Its notification shows how many computers are connected. While one of them isn't, it
- * looks for it on the local network.
+ * looks for it on the local network. When the user turned it on, it also sends new screenshots.
  */
 class SyncService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var finder: ComputerFinder
+    private lateinit var screenshots: ScreenshotWatcher
 
     /** Callbacks from the client's threads may still arrive after onDestroy. */
     private var running = false
@@ -72,14 +74,16 @@ class SyncService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
         )
         finder = ComputerFinder(this, pasteGet.client)
+        screenshots = ScreenshotWatcher(this) { image, _ -> sendScreenshot(image) }
         running = true
         pasteGet.client.start(listener)
         getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
     }
 
-    /** Also called again by the app after pairing, so a new computer is looked for. */
+    /** Also called again by the app after pairing or a settings change. */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         updateFinder()
+        updateScreenshots()
         return START_STICKY
     }
 
@@ -87,6 +91,7 @@ class SyncService : Service() {
         running = false
         getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network)
         finder.setActive(false)
+        screenshots.stop()
         main.removeCallbacksAndMessages(null)
         pasteGet.client.stop()
         pasteGet.clearConnected()
@@ -125,6 +130,21 @@ class SyncService : Service() {
         finder.setActive(pasteGet.client.pairedComputers().any { it.deviceId !in connected })
     }
 
+    private fun updateScreenshots() {
+        if (Preferences.sendScreenshots(this) && PhotoAccess.of(this) == PhotoAccess.FULL) {
+            screenshots.start()
+        } else {
+            screenshots.stop()
+        }
+    }
+
+    /** Runs on a background thread. Never logs contents: size only. */
+    private fun sendScreenshot(image: ByteArray) {
+        val sendable = Sender.sendable(image)
+        val sentTo = pasteGet.client.sendImage(sendable).toInt()
+        Log.i(TAG, "screenshot of ${sendable.size} bytes sent to $sentTo computers")
+    }
+
     private fun updateNotification() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
     }
@@ -139,6 +159,7 @@ class SyncService : Service() {
     }
 
     companion object {
+        private const val TAG = "paste-get"
         private const val CHANNEL_ID = "connection"
         private const val NOTIFICATION_ID = 1
 

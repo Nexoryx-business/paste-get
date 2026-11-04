@@ -17,9 +17,6 @@ import java.nio.ByteBuffer
 
 /** Sends text and images to the connected computers. Every function returns a message for the user. */
 object Sender {
-    private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
-    private val JPEG_SIGNATURE = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())
-
     /** How long to wait for a connection when the service was just started. */
     private const val CONNECT_WAIT_MS = 5_000L
 
@@ -84,7 +81,7 @@ object Sender {
      * it), other formats (WebP, HEIC…) re-encoded as PNG.
      */
     fun sendable(bytes: ByteArray): ByteArray {
-        if (bytes.startsWith(PNG_SIGNATURE) || bytes.startsWith(JPEG_SIGNATURE)) return bytes
+        if (Images.isPng(bytes) || Images.isJpeg(bytes)) return bytes
         // createSource(ByteBuffer) exists from API 28; the ByteArray overload only from API 31.
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, _, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
@@ -95,6 +92,3 @@ object Sender {
         }
     }
 }
-
-private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
-    size >= prefix.size && copyOf(prefix.size).contentEquals(prefix)
