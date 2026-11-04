@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
     private var screenshots by mutableStateOf(ScreenshotSetting(wanted = false, access = PhotoAccess.NONE))
     private var photoRequestDenied by mutableStateOf(false)
     private var copiesOn by mutableStateOf(false)
+    private var fallback by mutableStateOf(FallbackAccess(readLogs = false, overlay = false))
 
     private val photoPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -109,12 +110,14 @@ class MainActivity : ComponentActivity() {
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
                     onOpenSettings = ::openAppSettings,
-                    autoCopy = AutoCopyCardState(copiesOn, shizuku, lastCopy),
+                    autoCopy = AutoCopyCardState(copiesOn, shizuku, fallback, lastCopy),
                     autoCopyActions = AutoCopyActions(
                         onChange = ::setSendCopies,
                         onAllowShizuku = pasteGet.autoCopy.shizuku::requestPermission,
                         onOpenShizuku = ::openShizuku,
                         onGetShizuku = ::getShizuku,
+                        onGrantFallback = ::grantFallback,
+                        onAllowOverlay = ::openOverlaySettings,
                     ),
                 )
             }
@@ -128,6 +131,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         refreshScreenshots()
         copiesOn = Preferences.sendCopies(this)
+        fallback = FallbackAccess.of(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -218,6 +222,21 @@ class MainActivity : ComponentActivity() {
 
     private fun openShizuku() {
         packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)?.let(::startActivity)
+    }
+
+    /** Android may restart the app to apply the log permission: the screen then comes back fresh. */
+    private fun grantFallback() {
+        message = getString(R.string.fallback_granting)
+        pasteGet.autoCopy.shizuku.grantFallback { failed ->
+            runOnUiThread {
+                fallback = FallbackAccess.of(this)
+                message = failed?.let { getString(R.string.fallback_failed, it) } ?: getString(R.string.fallback_granted)
+            }
+        }
+    }
+
+    private fun openOverlaySettings() {
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.fromParts("package", packageName, null)))
     }
 
     private fun getShizuku() {
@@ -394,13 +413,20 @@ private fun LastDeliveryText(delivery: LastDelivery) {
 }
 
 /** What the automatic copy card shows. */
-private data class AutoCopyCardState(val on: Boolean, val shizuku: ShizukuState, val lastCopy: LastCopy?)
+private data class AutoCopyCardState(
+    val on: Boolean,
+    val shizuku: ShizukuState,
+    val fallback: FallbackAccess,
+    val lastCopy: LastCopy?,
+)
 
 private class AutoCopyActions(
     val onChange: (Boolean) -> Unit,
     val onAllowShizuku: () -> Unit,
     val onOpenShizuku: () -> Unit,
     val onGetShizuku: () -> Unit,
+    val onGrantFallback: () -> Unit,
+    val onAllowOverlay: () -> Unit,
 )
 
 /** The automatic copy: on or off, how it works right now, and what to do if it doesn't. */
@@ -426,6 +452,7 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
             }
             if (state.on) {
                 ShizukuLine(state.shizuku, actions)
+                FallbackLine(state.shizuku, state.fallback, actions)
                 state.lastCopy?.let { LastCopyText(it) }
             }
         }
@@ -450,6 +477,23 @@ private fun ShizukuLine(shizuku: ShizukuState, actions: AutoCopyActions) {
             TextButton(onClick = actions.onOpenShizuku) { Text(stringResource(R.string.shizuku_open)) }
         ShizukuStatus.NO_PERMISSION ->
             TextButton(onClick = actions.onAllowShizuku) { Text(stringResource(R.string.shizuku_allow)) }
+        else -> {}
+    }
+}
+
+/** The permissions that keep copies going when Shizuku stops, and how to get them. */
+@Composable
+private fun FallbackLine(shizuku: ShizukuState, fallback: FallbackAccess, actions: AutoCopyActions) {
+    when {
+        fallback.ready -> Text(stringResource(R.string.fallback_ready), style = MaterialTheme.typography.bodySmall)
+        shizuku.status == ShizukuStatus.WATCHING -> {
+            Text(stringResource(R.string.fallback_offer), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = actions.onGrantFallback) { Text(stringResource(R.string.fallback_grant)) }
+        }
+        fallback.readLogs -> {
+            Text(stringResource(R.string.fallback_needs_overlay), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = actions.onAllowOverlay) { Text(stringResource(R.string.fallback_allow_overlay)) }
+        }
         else -> {}
     }
 }

@@ -24,7 +24,7 @@ import kotlin.system.exitProcess
  * Binder can carry, so the app can fall back to another mode instead of this process crashing.
  */
 @Keep
-class ShellClipboardService(@Suppress("unused") private val context: Context?) : IShellClipboard.Stub() {
+class ShellClipboardService(private val context: Context?) : IShellClipboard.Stub() {
     /** For Shizuku servers older than API 13, which don't pass a Context. */
     @Keep
     constructor() : this(null)
@@ -56,6 +56,12 @@ class ShellClipboardService(@Suppress("unused") private val context: Context?) :
 
     override fun read(userId: Int): ClipData? = carried {
         clipboard.call(GET_CLIP, userId) as ClipData?
+    }
+
+    /** Grants only the app this service belongs to, which Shizuku tells through the Context. */
+    override fun grantFallback(): String = carried {
+        val app = context?.packageName ?: return@carried "Shizuku is too old to tell which app to grant"
+        ShellCommands.runAll(ShellCommands.fallbackGrants(app))
     }
 
     /** Tells the app about each change. The app reads the clip itself, if it wants it. */

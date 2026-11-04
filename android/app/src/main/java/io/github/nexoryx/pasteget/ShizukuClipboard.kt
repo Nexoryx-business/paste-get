@@ -127,6 +127,24 @@ class ShizukuClipboard(
         set(ShizukuStatus.OFF)
     }
 
+    /**
+     * Grants the fallback mode's permissions ([FallbackAccess]) through Shizuku. [onDone] gets
+     * `null` once granted, or what failed, on a background thread. Android restarts the app to
+     * apply the log permission, so [onDone] may never be called.
+     */
+    fun grantFallback(onDone: (String?) -> Unit) {
+        val connected = service ?: return onDone("Shizuku is not connected")
+        worker.execute {
+            val failed = try {
+                connected.grantFallback().ifEmpty { null }
+            } catch (e: Exception) {
+                e.message ?: e.javaClass.simpleName
+            }
+            if (failed != null) Log.w(TAG, "Shizuku: grants failed: $failed")
+            onDone(failed)
+        }
+    }
+
     /** Shows Shizuku's own dialog. Call it from an activity in front. */
     fun requestPermission() {
         if (Shizuku.pingBinder()) Shizuku.requestPermission(PERMISSION_REQUEST)

@@ -26,4 +26,11 @@ interface IShellClipboard {
 
     /** The clip on the clipboard of `userId`. Null if it's empty or the phone is locked. */
     ClipData read(int userId) = 3;
+
+    /**
+     * Grants the app what the fallback mode needs when Shizuku isn't running: reading the system
+     * log and showing a window over other apps. The grants last across reboots. Android restarts
+     * the app to apply the first. Returns what failed, or an empty string.
+     */
+    String grantFallback() = 4;
 }

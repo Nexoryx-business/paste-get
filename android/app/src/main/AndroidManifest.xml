@@ -19,6 +19,14 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- The automatic copy's fallback, when Shizuku isn't running: see the system log say the
+         clipboard changed, then read it from a window shown for a moment over other apps.
+         READ_LOGS can't be granted from the app: Shizuku (or adb) grants it once. -->
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- To tell "Shizuku is not installed" from "Shizuku is not running". -->
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
