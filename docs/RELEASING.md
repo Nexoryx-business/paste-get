@@ -86,6 +86,22 @@ or IzzyOnDroid can check it.
   application from the maintainer once the repository is public.
 - **Linux:** the AppImage isn't signed; check it against `SHA256SUMS`.
 
+## The README demo GIF
+
+It shows the real thing, so it's recorded on the real devices, not mocked up. About 10 seconds:
+take a screenshot on the phone, then `Ctrl+V` in a chat app on the PC, with the "Image from …"
+notification in view.
+
+1. Record the PC screen: Windows: `Win+Alt+R` (Game Bar) or ShareX; KDE: Spectacle →
+   *Record screen*; Hyprland: `wf-recorder -g "$(slurp)"`. Hold the phone in view of a second
+   camera, or show its screen with `scrcpy` next to the chat window.
+2. Convert at 960 px wide, 12 fps, kept under 5 MB:
+   ```sh
+   ffmpeg -i demo.mp4 -vf "fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" docs/demo.gif
+   ```
+3. Check no private messages, notifications or names are visible, then add it to the top of
+   `README.md`: `![Screenshot on the phone, Ctrl+V on the PC](docs/demo.gif)`.
+
 ## Making a release
 
 1. Everything for the version is merged on `main`, and CI is green.
@@ -94,4 +110,6 @@ or IzzyOnDroid can check it.
 3. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
 4. Wait for the *Release* workflow, then open the draft release on GitHub. Install each package
    on a real machine (Windows 11, Arch) and run `docs/TESTING.md`, sections 9–11.
-5. Write the release notes (what works, what's known not to), then publish.
+5. The security review of `docs/REVIEW.md` is done for this version, or the release notes say it
+   isn't.
+6. Write the release notes (what works, what's known not to), then publish.

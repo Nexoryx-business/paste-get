@@ -92,8 +92,11 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
     it on the AUR needs a maintainer account)
   - [x] Release APK, signed in CI with a key kept in repository secrets (creating the key and
     the secrets is a one-time step for the maintainer, `RELEASING.md`)
-- [ ] README demo GIF, `SECURITY.md` draft
-- [ ] Human review of crypto and protocol code
+- [x] `SECURITY.md` draft: threat model, known gaps, private reporting
+- [ ] README demo GIF: needs the real devices; how to record it is in `RELEASING.md`
+- [ ] Human review of crypto and protocol code: `docs/REVIEW.md` lists the files and the
+  22 properties to check
+- [ ] PC side can revoke a paired phone (`SECURITY.md`, known gaps), before 0.1 is announced
 
 ## v0.2 — "smart"
 History + search, 2FA codes, PC-side OCR, sensitive filters, auto-crop, smart actions.

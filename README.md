@@ -46,6 +46,8 @@ with a second, in-memory daemon standing in for the phone.
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Wire protocol: transport, pairing, messages |
 | [`docs/TESTING.md`](docs/TESTING.md) | Testing on real machines |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | How packages are built and released |
+| [`docs/REVIEW.md`](docs/REVIEW.md) | Guide for the security review of the crypto and protocol code |
+| [`SECURITY.md`](SECURITY.md) | Threat model and how to report a vulnerability |
 | [`docs/devices/xiaomi-hyperos.md`](docs/devices/xiaomi-hyperos.md) | Phone setup for Xiaomi / POCO / Redmi (HyperOS) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to build, test and contribute |
 | [`CLAUDE.md`](CLAUDE.md) | Rules for AI-assisted development in this repo |
