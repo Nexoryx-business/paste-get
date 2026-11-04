@@ -85,7 +85,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [ ] Verified on Windows 11, KDE Plasma 6 Wayland and Hyprland (`TESTING.md`, sections 9–11)
 
 ### M8 — Release 0.1
-- [ ] CI builds: Windows installer, AppImage, AUR `PKGBUILD`, signed APK
+- [x] CI builds: Windows installer, AppImage, AUR `PKGBUILD`, signed APK (all four green in
+  the Release workflow; the APK is signed once the release key is in the secrets)
   - [x] Windows installer (NSIS, per user) and AppImage, with `pasteget` inside: `release.yml`,
     a draft release for each `v*` tag (`RELEASING.md`)
   - [x] AUR `paste-get-git` PKGBUILD, built with `makepkg` in an Arch container by CI (publishing
