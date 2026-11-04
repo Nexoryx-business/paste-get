@@ -1,0 +1,28 @@
+[package]
+name = "pasteget-tray"
+description = "paste-get tray app: status, paired devices, pause, recent clips"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pasteget-tray"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+pasteget-desktop = { path = ".." }
+# No window, no webview content: only the tray icon and its menu.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

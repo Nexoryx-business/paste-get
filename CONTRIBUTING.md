@@ -19,8 +19,13 @@ cargo build --workspace
 cargo run -p pasteget-desktop     # runs the `pasteget` CLI
 ```
 
-Linux only: clipboard support will need the Wayland/X11 development headers once it lands;
-this section will list them.
+Linux only: the tray app (`desktop/tray/`, built with Tauri 2) links to WebKitGTK and
+libayatana-appindicator. The daemon itself needs no system library.
+
+- Arch: `sudo pacman -S --needed webkit2gtk-4.1 libayatana-appindicator`
+- Debian/Ubuntu: `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`
+
+Without them, leave the tray out: `cargo build -p pasteget-desktop`.
 
 ## Before opening a pull request
 

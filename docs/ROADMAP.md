@@ -76,7 +76,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
   ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`; pending on the real devices.
 
 ### M7 — Tray app
-- [ ] Tauri 2 tray: status, paired devices, pause, last items
+- [x] Tauri 2 tray: status, paired devices, pause, last items (`pasteget-tray`, runs the daemon
+  in-process unless one already runs; `pasteget pause`, `resume` and `recent` on the command line)
 - [ ] Autostart on Windows and Linux
 - [ ] Hotkeys: `RegisterHotKey` (Windows), GlobalShortcuts portal (KDE), `bind … exec pasteget …` (Hyprland)
 

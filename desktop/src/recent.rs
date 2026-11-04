@@ -123,6 +123,30 @@ pub fn preview(text: &str) -> String {
     out.into_iter().collect()
 }
 
+/// "340 B", "12 KB", "1.2 MB".
+pub fn size(len: usize) -> String {
+    const KB: usize = 1024;
+    const MB: usize = 1024 * 1024;
+    match len {
+        0..KB => format!("{len} B"),
+        KB..MB => format!("{} KB", len.div_ceil(KB)),
+        // One decimal, rounded.
+        _ => {
+            let tenths = (len * 10 + MB / 2) / MB;
+            format!("{}.{} MB", tenths / 10, tenths % 10)
+        }
+    }
+}
+
+/// How long ago, roughly: "just now", "5 min", "2 h".
+pub fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min", secs / 60),
+        _ => format!("{} h", secs / 3600),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +232,16 @@ mod tests {
             preview(&"x".repeat(PREVIEW_CHARS)),
             "x".repeat(PREVIEW_CHARS)
         );
+    }
+
+    #[test]
+    fn sizes_and_ages_read_well() {
+        assert_eq!(size(340), "340 B");
+        assert_eq!(size(12 * 1024), "12 KB");
+        assert_eq!(size(1_258_291), "1.2 MB");
+        assert_eq!(size(64 * 1024 * 1024), "64.0 MB");
+        assert_eq!(ago(5), "just now");
+        assert_eq!(ago(300), "5 min");
+        assert_eq!(ago(7300), "2 h");
     }
 }

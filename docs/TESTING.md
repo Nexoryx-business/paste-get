@@ -2,8 +2,8 @@
 
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
-section 6 automatic screenshots, section 7 the way back, from the PC to the phone, and section 8
-the automatic copy on the phone.
+section 6 automatic screenshots, section 7 the way back, from the PC to the phone, section 8
+the automatic copy on the phone, and section 9 the tray app.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -34,7 +34,7 @@ keep it, test on Arch instead.
 
 ### Arch Linux (KDE Plasma or Hyprland)
 ```sh
-sudo pacman -S --needed rustup git base-devel
+sudo pacman -S --needed rustup git base-devel webkit2gtk-4.1 libayatana-appindicator
 rustup default stable
 git clone https://github.com/Nexoryx-business/paste-get
 cd paste-get
@@ -42,7 +42,9 @@ git checkout ccr-8ee1704b-80slpz   # until this branch is merged
 cargo build --release
 alias pasteget="$PWD/target/release/pasteget"
 ```
-No other library is needed: Wayland and X11 are spoken directly.
+The daemon needs no other library: Wayland and X11 are spoken directly. The two extra packages
+are for the tray app (section 9). Without them, build only the daemon and the command:
+`cargo build --release -p pasteget-desktop`.
 
 ## 2. Start both daemons
 
@@ -250,6 +252,38 @@ your report**: it shows which variant HyperOS has. If the card says "Shizuku can
 clipboard on this phone: unknown signature …", report the whole message: the app only needs that
 signature added.
 
+## 9. The tray app (M7)
+
+`pasteget-tray` (`pasteget-tray.exe` on Windows, next to `pasteget` in `target/release`) puts a
+paste-get icon in the system tray and runs the daemon itself, so no terminal is needed. If a
+daemon already runs for the profile (`pasteget daemon` in a terminal), it shows that one instead.
+It takes `--profile` like `pasteget`.
+
+Where the icon shows up:
+- **Windows:** the notification area; it may hide under the `^` arrow at first. Drag it onto the
+  taskbar to keep it visible.
+- **KDE Plasma:** the system tray, possibly under the arrow.
+- **Hyprland:** only in a bar with a tray, such as Waybar's `tray` module. Without one, the app
+  runs but shows nothing.
+
+Stop any `pasteget daemon` first, then start `pasteget-tray` (from a terminal the first time, to
+see its log). Keep the fake phone of section 2 running.
+
+| # | Do this | Expected |
+|---|---|---|
+| T1 | Click (or right-click) the icon | A menu: "paste-get · <this PC>", "Syncing with 1 device", the paired devices with ● (connected) or ○, *Recent*, *Pause syncing*, *Quit* |
+| T2 | Copy text on the PC, then open *Recent* | The text is first, "· this computer, just now" |
+| T3 | `pasteget --profile phone send "from the phone"`, open *Recent* | It's first, with the fake phone's name |
+| T4 | Copy something else, then click the T2 entry in *Recent*; `Ctrl+V` | The T2 text is pasted. The fake phone logs nothing (it had it already) |
+| T5 | Tick *Pause syncing* | The icon turns grey and the menu says "Paused"; copies are no longer sent (row 8 of section 3) |
+| T6 | `pasteget resume` in a terminal | Within 2 s, the icon is in colour again and *Pause syncing* is unticked |
+| T7 | Stop the fake phone (Ctrl+C) | Within a few seconds its line turns ○ and the menu says "No device connected" |
+| T8 | *Quit* | The icon disappears; `pasteget status` says the daemon is not running |
+| T9 | Start `pasteget daemon` in a terminal, then `pasteget-tray` | The tray shows that daemon. *Quit* closes the tray only: the daemon keeps running |
+
+Report which rows passed on Windows 11, KDE Plasma and Hyprland, and anything that looks wrong
+in the menu (cut-off text, missing ticks, a menu that closes by itself).
+
 ## Known limitations
 
 - If the PC changes address while the phone is connected, the phone notices only when the old
@@ -265,4 +299,6 @@ signature added.
   the clipboard (row 6 measures the cost). Native change events are planned.
 - IPv4 only.
 - The identity key is a file readable only by your user, not yet in the OS keystore.
+- The tray's *Recent* list is in memory only, holds the last 10 clips, and forgets them when the
+  daemon stops. Sensitive clips (passwords) never appear in it. Pausing doesn't survive a restart.
 - Text and images only (PNG and JPEG on the wire). Copying a file in a file manager isn't synced.

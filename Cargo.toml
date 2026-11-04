@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "desktop", "ffi", "uniffi-bindgen"]
+members = ["core", "desktop", "desktop/tray", "ffi", "uniffi-bindgen"]
 exclude = ["fuzz"]
 
 [workspace.package]

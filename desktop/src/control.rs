@@ -99,6 +99,22 @@ pub struct RecentReply {
     pub preview: Option<String>,
 }
 
+impl RecentReply {
+    /// "Text: hello world" or "Image (PNG, 1.2 MB)".
+    pub fn describe(&self) -> String {
+        match &self.preview {
+            Some(preview) => format!("Text: {preview}"),
+            None => {
+                let kind = self
+                    .mime_type
+                    .strip_prefix("image/")
+                    .map_or_else(|| self.mime_type.clone(), str::to_uppercase);
+                format!("Image ({kind}, {})", recent::size(self.len))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceReply {
     pub id: String,

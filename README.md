@@ -30,9 +30,11 @@ cargo build --release
 ./target/release/pasteget daemon        # keep it running
 ./target/release/pasteget pair          # shows a pairing QR code
 ./target/release/pasteget status
+./target/release/pasteget-tray          # or: a tray icon that runs the daemon for you
 ```
 
-`pasteget --help` lists every command. [`docs/TESTING.md`](docs/TESTING.md) shows how to test
+On Linux, the tray needs WebKitGTK and libayatana-appindicator (see
+[`CONTRIBUTING.md`](CONTRIBUTING.md)). `pasteget --help` lists every command. [`docs/TESTING.md`](docs/TESTING.md) shows how to test
 with a second, in-memory daemon standing in for the phone.
 
 ## Docs
@@ -53,7 +55,8 @@ with a second, in-memory daemon standing in for the phone.
 paste-get/
 ├─ core/            Rust: protocol, crypto, pairing, sessions (shared by every app)
 ├─ proto/           Protobuf message definitions
-├─ desktop/         Rust daemon + `pasteget` CLI (Windows, Linux, macOS); tray app later
+├─ desktop/         Rust daemon + `pasteget` CLI (Windows, Linux, macOS)
+│  └─ tray/         Tauri 2 tray app
 ├─ ffi/             The phone API, exported to Kotlin with UniFFI
 ├─ uniffi-bindgen/  Generates the Kotlin bindings
 ├─ android/         Kotlin + Jetpack Compose app

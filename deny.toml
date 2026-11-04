@@ -10,6 +10,9 @@ ignore = [
     # basic-toml is archived (no vulnerability). Only reached through askama, the template engine
     # uniffi_bindgen uses at build time to generate Kotlin; it never ships in the app or daemon.
     { id = "RUSTSEC-2026-0374", reason = "build-time only, via uniffi_bindgen/askama" },
+    # proc-macro-error is unmaintained (no vulnerability). A compile-time macro helper reached
+    # through glib-macros/gtk3-macros, the GTK 3 bindings Tauri 2 uses on Linux for the tray.
+    { id = "RUSTSEC-2024-0370", reason = "build-time only, via Tauri's gtk-rs 0.18 on Linux" },
 ]
 
 [licenses]

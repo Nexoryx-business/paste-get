@@ -16,6 +16,7 @@ use pasteget_desktop::config::{DEFAULT_PROFILE, Profile};
 use pasteget_desktop::control::{self, Endpoint, Request, Response};
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
 use pasteget_desktop::notify::DesktopNotifier;
+use pasteget_desktop::recent;
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
@@ -307,47 +308,14 @@ async fn recent(endpoint: &Endpoint) -> Result<()> {
         for clip in clips {
             println!(
                 "{:>8}  {:<20}  {}",
-                ago(clip.age_secs),
+                recent::ago(clip.age_secs),
                 clip.from.as_deref().unwrap_or("this computer"),
-                describe(&clip)
+                clip.describe()
             );
         }
         true
     })
     .await
-}
-
-/// "Text: hello world" or "Image (PNG, 1.2 MB)".
-fn describe(clip: &control::RecentReply) -> String {
-    match &clip.preview {
-        Some(preview) => format!("Text: {preview}"),
-        None => {
-            let kind = clip
-                .mime_type
-                .strip_prefix("image/")
-                .map_or(clip.mime_type.clone(), str::to_uppercase);
-            format!("Image ({kind}, {})", size(clip.len))
-        }
-    }
-}
-
-fn size(len: usize) -> String {
-    let len = len as f64;
-    if len < 1024.0 {
-        format!("{len} B")
-    } else if len < 1024.0 * 1024.0 {
-        format!("{:.0} KB", len / 1024.0)
-    } else {
-        format!("{:.1} MB", len / (1024.0 * 1024.0))
-    }
-}
-
-fn ago(secs: u64) -> String {
-    match secs {
-        0..60 => "just now".into(),
-        60..3600 => format!("{} min", secs / 60),
-        _ => format!("{} h", secs / 3600),
-    }
 }
 
 /// Sends a one-answer request. `on_success` returns `false` for unexpected answers.
