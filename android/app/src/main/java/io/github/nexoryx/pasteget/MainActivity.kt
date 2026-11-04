@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                 val shizuku by pasteGet.autoCopy.shizuku.state.collectAsStateWithLifecycle()
                 val logs by pasteGet.autoCopy.logs.state.collectAsStateWithLifecycle()
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
+                val lastReceived by ReceivedClips.last.collectAsStateWithLifecycle()
                 HomeScreen(
                     deviceId = pasteGet.client.deviceId(),
                     computers = computers,
@@ -107,6 +108,7 @@ class MainActivity : ComponentActivity() {
                     onSendClipboard = ::sendClipboard,
                     onForget = ::forget,
                     lastDelivery = lastDelivery,
+                    lastReceived = lastReceived,
                     screenshots = screenshots,
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
@@ -300,6 +302,7 @@ private fun HomeScreen(
     onSendClipboard: () -> Unit,
     onForget: (PairedComputer) -> Unit,
     lastDelivery: LastDelivery?,
+    lastReceived: LastReceived?,
     screenshots: ScreenshotSetting,
     photoRequestDenied: Boolean,
     onScreenshotsChange: (Boolean) -> Unit,
@@ -342,6 +345,7 @@ private fun HomeScreen(
 
         ScreenshotsCard(screenshots, photoRequestDenied, onScreenshotsChange, onOpenSettings)
         lastDelivery?.let { LastDeliveryText(it) }
+        lastReceived?.let { LastReceivedText(it) }
         AutoCopyCard(autoCopy, autoCopyActions)
 
         if (computers.isNotEmpty()) {
@@ -449,26 +453,31 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.copies_title), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        stringResource(
-                            when {
-                                !state.on -> R.string.copies_off
-                                CopyMode.of(state.shizuku, state.logs) != CopyMode.MANUAL -> R.string.copies_on
-                                else -> R.string.copies_waiting
-                            },
-                        ),
+                        if (state.on) modeText(state) else stringResource(R.string.copies_off),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Switch(checked = state.on, onCheckedChange = actions.onChange)
             }
             if (state.on) {
-                ShizukuLine(state.shizuku, actions)
+                // What isn't working yet, and the step that fixes it.
+                if (state.shizuku.status != ShizukuStatus.WATCHING) {
+                    ShizukuLine(state.shizuku, actions)
+                    LogLine(state.logs, actions)
+                }
                 FallbackLine(state.shizuku, state.fallback, actions)
-                LogLine(state.logs, actions)
                 state.lastCopy?.let { LastCopyText(it) }
             }
         }
     }
+}
+
+/** The health of the automatic copy in one line: how copies are read right now. */
+@Composable
+private fun modeText(state: AutoCopyCardState): String = when (CopyMode.of(state.shizuku, state.logs)) {
+    CopyMode.SHIZUKU -> stringResource(R.string.mode_shizuku, state.shizuku.detail.orEmpty())
+    CopyMode.LOGS -> stringResource(R.string.mode_logs)
+    CopyMode.MANUAL -> stringResource(R.string.mode_manual)
 }
 
 @Composable
@@ -496,9 +505,10 @@ private fun ShizukuLine(shizuku: ShizukuState, actions: AutoCopyActions) {
 /** The permissions that keep copies going when Shizuku stops, and how to get them. */
 @Composable
 private fun FallbackLine(shizuku: ShizukuState, fallback: FallbackAccess, actions: AutoCopyActions) {
+    val watching = shizuku.status == ShizukuStatus.WATCHING
     when {
-        fallback.ready -> Text(stringResource(R.string.fallback_ready), style = MaterialTheme.typography.bodySmall)
-        shizuku.status == ShizukuStatus.WATCHING -> {
+        fallback.ready -> if (watching) Text(stringResource(R.string.fallback_ready), style = MaterialTheme.typography.bodySmall)
+        watching -> {
             Text(stringResource(R.string.fallback_offer), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = actions.onGrantFallback) { Text(stringResource(R.string.fallback_grant)) }
         }
@@ -523,6 +533,17 @@ private fun LogLine(logs: LogStatus, actions: AutoCopyActions) {
     if (logs == LogStatus.STARTING) {
         TextButton(onClick = actions.onRetryLogs) { Text(stringResource(R.string.logs_retry)) }
     }
+}
+
+/** What the last clip from a computer was, and whether it made it to the phone's clipboard. */
+@Composable
+private fun LastReceivedText(received: LastReceived) {
+    val context = LocalContext.current
+    val kind = stringResource(if (received.mimeType.startsWith("image/")) R.string.kind_image else R.string.kind_text)
+    val size = Formatter.formatShortFileSize(context, received.bytes.toLong())
+    val time = DateFormat.getTimeFormat(context).format(Date(received.atMillis))
+    val format = if (received.onClipboard) R.string.last_received else R.string.last_received_failed
+    Text(stringResource(format, kind, size, time), style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

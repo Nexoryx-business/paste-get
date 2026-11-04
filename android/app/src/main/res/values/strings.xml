@@ -39,10 +39,15 @@
     <string name="last_screenshot">Last screenshot (%1$s) reached your computer in %2$d ms</string>
     <string name="last_send">Last send (%1$s) reached your computer in %2$d ms</string>
     <string name="last_refused">Your computer refused the last clip</string>
+    <string name="kind_text">text</string>
+    <string name="kind_image">image</string>
+    <string name="last_received">Last from your computer: %1$s (%2$s) at %3$s, on the clipboard</string>
+    <string name="last_received_failed">Last from your computer: %1$s (%2$s) at %3$s, could not go on the clipboard</string>
     <string name="copies_title">Send what you copy</string>
     <string name="copies_off">Copy on the phone, paste on your computer, no tap</string>
-    <string name="copies_on">Each copy goes to your computers\' clipboard</string>
-    <string name="copies_waiting">Not yet: see below</string>
+    <string name="mode_shizuku">Mode: Shizuku, as %s. Each copy goes to your computers.</string>
+    <string name="mode_logs">Mode: fallback, through the system log. Each copy goes to your computers.</string>
+    <string name="mode_manual">Mode: by hand, until the step below is done. Meanwhile, send with the Quick Settings tile or Share → Send to PC.</string>
     <string name="shizuku_connecting">Connecting to Shizuku…</string>
     <string name="shizuku_not_installed">Android only lets the app in front read the clipboard. paste-get reads it through Shizuku, a free app that lends it the rights of the shell.</string>
     <string name="shizuku_not_running">Shizuku isn\'t running. Start it again after each restart of the phone.</string>
@@ -62,7 +67,7 @@
     <string name="fallback_allow_overlay">Allow display over other apps</string>
     <string name="logs_waiting">Meanwhile, paste-get reads copies another way, once you open it after a restart of the phone.</string>
     <string name="logs_starting">Meanwhile, paste-get reads copies another way. If Android asks, allow paste-get to access the device logs.</string>
-    <string name="logs_running">Meanwhile, copies are read another way: a window appears for a moment, which may close the keyboard.</string>
+    <string name="logs_running">To read each copy, a window shows for a moment, which may close the keyboard. Shizuku avoids that.</string>
     <string name="logs_retry">Ask again</string>
     <string name="copies_channel">Sending copies</string>
     <string name="copies_paused_title">Copies are not sent</string>
