@@ -274,18 +274,38 @@ impl PhoneClient {
         let mime_type = mime::of_image(&image).ok_or(PastegetError::UnsupportedImage)?;
         Ok(self.send(mime_type, image, false))
     }
+
+    /// Text the phone's clipboard now holds, seen by the automatic copy rather than shared by
+    /// the user. Sent to every connected computer unless the clipboard already held it: a clip
+    /// from a computer, or a copy reported twice. Returns how many computers it went to, or
+    /// `None` if it wasn't new.
+    ///
+    /// `sensitive` copies (passwords, codes) are sent marked as such, so computers keep them out
+    /// of history and clipboard managers.
+    pub fn copied_text(&self, text: String, sensitive: bool) -> Option<u32> {
+        let data = text.into_bytes();
+        if !lock(&self.state.guard).should_send(mime::TEXT, &data) {
+            return None;
+        }
+        Some(self.broadcast(mime::TEXT, data, sensitive))
+    }
 }
 
 impl PhoneClient {
+    /// Sends what the user shared, even if it was sent before.
     fn send(&self, mime_type: &str, data: Vec<u8>, sensitive: bool) -> u32 {
+        // Remember it, so the automatic copy doesn't send it a second time.
+        lock(&self.state.guard).should_send(mime_type, &data);
+        self.broadcast(mime_type, data, sensitive)
+    }
+
+    fn broadcast(&self, mime_type: &str, data: Vec<u8>, sensitive: bool) -> u32 {
         let clip = Clip {
             mime_type: mime_type.to_owned(),
             data,
             sensitive,
             origin: self.state.identity.device_id(),
         };
-        // Remember it, so the same content coming back from a computer isn't re-applied.
-        lock(&self.state.guard).should_send(&clip.mime_type, &clip.data);
         u32::try_from(self.state.peers.broadcast(&clip, None)).unwrap_or(u32::MAX)
     }
 

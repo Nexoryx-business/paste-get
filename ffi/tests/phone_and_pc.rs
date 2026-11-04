@@ -331,6 +331,50 @@ fn an_image_copied_on_the_pc_reaches_the_phone() {
     assert_eq!(received.into_raw(), screenshot.pixels);
 }
 
+/// Roadmap M5: what the phone's clipboard watcher reports reaches the PC once, and a clip from
+/// the PC is never sent back.
+#[test]
+fn copies_on_the_phone_reach_the_pc_without_echo() {
+    let pc = start_pc();
+    let qr_code = pc
+        .runtime
+        .block_on(pc.daemon.open_pairing())
+        .unwrap()
+        .to_uri();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let phone = PhoneClient::new(path_of(&phone_dir), "POCO".into()).unwrap();
+    phone.pair(qr_code).unwrap();
+    let listener = Arc::new(Recorder::default());
+    phone.start(listener.clone());
+    wait_until("the connection", || phone.connected_count() == 1);
+
+    assert_eq!(
+        phone.copied_text("copié sur le téléphone".into(), false),
+        Some(1)
+    );
+    wait_until("the copy on the PC clipboard", || {
+        pc.clipboard.get() == Some(Raw::Text("copié sur le téléphone".into()))
+    });
+    // The watcher may report one copy several times: it's sent once.
+    assert_eq!(
+        phone.copied_text("copié sur le téléphone".into(), false),
+        None
+    );
+
+    // Text copied on the PC goes on the phone clipboard, which then reports it: not sent back.
+    pc.clipboard.set(Raw::Text("copied on the PC".into()));
+    wait_until("the PC's copy on the phone", || {
+        !listener.clips.lock().unwrap().is_empty()
+    });
+    assert_eq!(phone.copied_text("copied on the PC".into(), false), None);
+
+    // A new copy on the phone is new again.
+    assert_eq!(phone.copied_text("encore".into(), true), Some(1));
+    wait_until("the second copy on the PC clipboard", || {
+        pc.clipboard.get() == Some(Raw::Text("encore".into()))
+    });
+}
+
 #[test]
 fn bad_input_is_refused() {
     let phone_dir = tempfile::tempdir().unwrap();
