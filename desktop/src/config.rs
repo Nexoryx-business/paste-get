@@ -5,7 +5,8 @@
 //! ```text
 //! <config dir>/paste-get/<profile>/
 //!   identity.key    Ed25519 private key (PKCS#8 DER). Readable by the user only.
-//!   settings.toml   Device name, port. Created with defaults, safe to edit.
+//!   settings.toml   Device name, port, notifications, hotkeys. Created with defaults, safe
+//!                   to edit.
 //!   devices.toml    Paired devices.
 //! ```
 //!
@@ -22,6 +23,8 @@ use anyhow::{Context, Result, bail};
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{PairedDevice, sanitize_device_name};
 use serde::{Deserialize, Serialize};
+
+use crate::hotkeys::HotkeySettings;
 
 pub const DEFAULT_PROFILE: &str = "default";
 pub const DEFAULT_PORT: u16 = 47290;
@@ -147,6 +150,8 @@ pub struct Settings {
     pub port: u16,
     /// Which received clips show a notification.
     pub notify: NotifyFor,
+    /// Global hotkeys. Must stay last: TOML puts tables after plain keys.
+    pub hotkeys: HotkeySettings,
 }
 
 /// `notify = "images"` in `settings.toml`.
@@ -174,6 +179,7 @@ impl Default for Settings {
             device_name: sanitize_device_name(&format!("{host} ({os})")),
             port: DEFAULT_PORT,
             notify: NotifyFor::default(),
+            hotkeys: HotkeySettings::default(),
         }
     }
 }
@@ -354,6 +360,29 @@ mod tests {
 
         fs::write(profile.dir().join(SETTINGS_FILE), "notify = \"all\"\n").unwrap();
         assert_eq!(profile.settings().unwrap().notify, NotifyFor::All);
+        assert_eq!(edited.hotkeys, HotkeySettings::default());
+
+        fs::write(
+            profile.dir().join(SETTINGS_FILE),
+            "[hotkeys]\ntoggle_pause = \"\"\n",
+        )
+        .unwrap();
+        let hotkeys = profile.settings().unwrap().hotkeys;
+        assert_eq!(hotkeys.toggle_pause, "");
+        assert_eq!(
+            hotkeys.send_clipboard,
+            HotkeySettings::default().send_clipboard
+        );
+    }
+
+    #[test]
+    fn default_settings_file_is_valid_toml_with_the_hotkeys_table() {
+        let (_base, profile) = profile();
+        profile.settings().unwrap();
+
+        let text = fs::read_to_string(profile.dir().join(SETTINGS_FILE)).unwrap();
+        assert!(text.contains("[hotkeys]"));
+        assert_eq!(profile.settings().unwrap(), Settings::default());
     }
 
     #[test]

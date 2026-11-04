@@ -55,14 +55,17 @@ enum Command {
         /// The pairing code (starts with pasteget://pair?).
         invite: String,
     },
-    /// Send text, or a text or PNG file, to every connected device.
+    /// Send text, a text or image file, or the clipboard, to every connected device.
     Send {
         /// Text to send.
-        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        #[arg(required_unless_present_any = ["file", "clipboard"], conflicts_with = "file")]
         text: Option<String>,
-        /// File to send instead: UTF-8 text or PNG.
+        /// File to send instead: UTF-8 text, PNG or JPEG.
         #[arg(long)]
         file: Option<PathBuf>,
+        /// Send what's on the clipboard now, even while paused. Handy for a hotkey.
+        #[arg(long, conflicts_with_all = ["text", "file"])]
+        clipboard: bool,
     },
     /// Show this device and its paired devices.
     Status,
@@ -101,7 +104,10 @@ async fn run(cli: Cli) -> Result<()> {
         } => daemon(profile, &endpoint, memory_clipboard, port).await,
         Command::Pair => pair(&endpoint).await,
         Command::Join { invite } => join(&endpoint, invite).await,
-        Command::Send { text, file } => send(&endpoint, text, file).await,
+        Command::Send {
+            clipboard: true, ..
+        } => send_request(&endpoint, &Request::SendClipboard).await,
+        Command::Send { text, file, .. } => send(&endpoint, text, file).await,
         Command::Status => status(&endpoint).await,
         Command::Pause { toggle } => pause(&endpoint, if toggle { None } else { Some(true) }).await,
         Command::Resume => pause(&endpoint, Some(false)).await,
@@ -129,10 +135,11 @@ async fn daemon(
         );
     }
     let mut options = DaemonOptions::listen_on(port.unwrap_or(profile.settings()?.port));
-    // A memory-clipboard daemon stands in for another device: its notifications would only
-    // confuse.
+    // A memory-clipboard daemon stands in for another device: its notifications and hotkeys
+    // would only confuse.
     if !memory_clipboard {
         options.notifier = Some(Arc::new(DesktopNotifier::start()));
+        options.hotkeys = true;
     }
     let daemon = if memory_clipboard {
         Daemon::start(profile, MemoryClipboard::default(), options).await?
@@ -232,7 +239,11 @@ async fn send(endpoint: &Endpoint, text: Option<String>, file: Option<PathBuf>) 
         mime_type: mime_type.to_owned(),
         data_base64: BASE64.encode(&data),
     };
-    expect_one(endpoint, &request, |response| match response {
+    send_request(endpoint, &request).await
+}
+
+async fn send_request(endpoint: &Endpoint, request: &Request) -> Result<()> {
+    expect_one(endpoint, request, |response| match response {
         Response::Sent { devices: 0 } => {
             println!("No device is connected right now.");
             true

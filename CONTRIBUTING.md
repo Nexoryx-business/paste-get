@@ -59,7 +59,7 @@ some on several Android versions. Their first run downloads those versions of An
 
 ### Fuzzing
 
-Parsers of untrusted input have fuzz targets in `fuzz/`. They need a nightly toolchain:
+Parsers have fuzz targets in `fuzz/`. They need a nightly toolchain:
 
 ```sh
 cargo +nightly install cargo-fuzz

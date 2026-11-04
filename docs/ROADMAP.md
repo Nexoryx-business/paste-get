@@ -80,7 +80,9 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
   in-process unless one already runs; `pasteget pause`, `resume` and `recent` on the command line)
 - [x] Autostart on Windows and Linux: the tray's *Start at login* (`Run` key, XDG autostart;
   `exec-once` on Hyprland, which ignores XDG autostart)
-- [ ] Hotkeys: `RegisterHotKey` (Windows), GlobalShortcuts portal (KDE), `bind … exec pasteget …` (Hyprland)
+- [x] Hotkeys: `RegisterHotKey` (Windows), GlobalShortcuts portal (KDE), `bind … exec pasteget …` (Hyprland).
+  Pause/resume and "send the clipboard now" (`pasteget send --clipboard`), set in `settings.toml`
+- [ ] Verified on Windows 11, KDE Plasma 6 Wayland and Hyprland (`TESTING.md`, sections 9–11)
 
 ### M8 — Release 0.1
 - [ ] CI builds: Windows installer, AppImage, AUR `PKGBUILD`, signed APK

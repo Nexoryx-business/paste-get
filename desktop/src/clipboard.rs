@@ -308,7 +308,13 @@ impl ClipboardBackend for MemoryClipboard {
 /// daemon started isn't reported either: only new copies are sent.
 #[derive(Debug)]
 pub struct ClipboardWatcher {
-    writes: mpsc::Sender<WriteRequest>,
+    requests: mpsc::Sender<Request>,
+}
+
+enum Request {
+    Write(WriteRequest),
+    /// What's on the clipboard now, for "send the clipboard" commands.
+    Read(tokio::sync::oneshot::Sender<Result<Option<Content>>>),
 }
 
 /// Content from a peer to put on the clipboard.
@@ -326,12 +332,23 @@ impl ClipboardWatcher {
         poll_interval: Duration,
         changes: async_mpsc::Sender<Content>,
     ) -> Result<Self> {
-        let (writes, write_requests) = mpsc::channel();
+        let (requests, received) = mpsc::channel();
         thread::Builder::new()
             .name("clipboard".into())
-            .spawn(move || watch(backend, poll_interval, &write_requests, &changes))
+            .spawn(move || watch(backend, poll_interval, &received, &changes))
             .context("could not start the clipboard thread")?;
-        Ok(Self { writes })
+        Ok(Self { requests })
+    }
+
+    /// Reads the clipboard now. `None` when it holds nothing that can be sent.
+    pub async fn read(&self) -> Result<Option<Content>> {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        self.requests
+            .send(Request::Read(reply))
+            .map_err(|_| anyhow::anyhow!("the clipboard thread has stopped"))?;
+        answer
+            .await
+            .map_err(|_| anyhow::anyhow!("the clipboard thread has stopped"))?
     }
 
     /// Puts content received from a peer on the clipboard, then calls `applied` (from the
@@ -341,11 +358,11 @@ impl ClipboardWatcher {
         content: Content,
         applied: impl FnOnce(Duration) + Send + 'static,
     ) -> Result<()> {
-        self.writes
-            .send(WriteRequest {
+        self.requests
+            .send(Request::Write(WriteRequest {
                 content,
                 applied: Box::new(applied),
-            })
+            }))
             .map_err(|_| anyhow::anyhow!("the clipboard thread has stopped"))
     }
 }
@@ -353,14 +370,26 @@ impl ClipboardWatcher {
 fn watch(
     mut backend: impl ClipboardBackend,
     poll_interval: Duration,
-    write_requests: &mpsc::Receiver<WriteRequest>,
+    requests: &mpsc::Receiver<Request>,
     changes: &async_mpsc::Sender<Content>,
 ) {
     let mut last_seen = backend.read().ok().flatten().map(|raw| raw.fingerprint());
 
     loop {
-        match write_requests.recv_timeout(poll_interval) {
-            Ok(WriteRequest { content, applied }) => {
+        match requests.recv_timeout(poll_interval) {
+            Ok(Request::Read(reply)) => {
+                let content = match backend.read() {
+                    Ok(Some(raw)) => {
+                        // Sent by whoever asked: the next poll needn't report it too.
+                        last_seen = Some(raw.fingerprint());
+                        Content::from_raw(raw).map(Some)
+                    }
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(content);
+            }
+            Ok(Request::Write(WriteRequest { content, applied })) => {
                 let started = Instant::now();
                 let raw = match content.to_raw() {
                     Ok(raw) => raw,
@@ -546,6 +575,21 @@ mod tests {
 
         assert_eq!(clipboard.get(), Some(Raw::Image(image(2, 2))));
         assert!(applied.try_recv().is_ok(), "the write was not reported");
+        assert!(next_change(&mut changes).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn reads_on_demand_without_reporting_it_again() {
+        let clipboard = MemoryClipboard::default();
+        let (tx, mut changes) = async_mpsc::channel(8);
+        let watcher = ClipboardWatcher::spawn(clipboard.clone(), POLL, tx).unwrap();
+        assert!(watcher.read().await.unwrap().is_none());
+
+        clipboard.set(Raw::Text("read me".into()));
+        let content = watcher.read().await.unwrap().unwrap();
+
+        assert_eq!(content.mime_type, mime::TEXT);
+        assert_eq!(content.data, b"read me");
         assert!(next_change(&mut changes).await.is_none());
     }
 

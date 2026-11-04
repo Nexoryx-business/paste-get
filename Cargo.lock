@@ -2950,6 +2950,7 @@ dependencies = [
  "clap",
  "data-encoding",
  "dirs",
+ "futures-util",
  "gethostname",
  "if-addrs",
  "image",

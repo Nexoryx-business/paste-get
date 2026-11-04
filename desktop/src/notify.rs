@@ -39,12 +39,17 @@ impl Received {
 /// Shows notifications. Called from the clipboard thread: must not block.
 pub trait Notifier: Send + Sync + fmt::Debug + 'static {
     fn received(&self, received: Received);
+
+    /// What a hotkey just did, such as "Syncing paused". Never clipboard contents.
+    fn notice(&self, summary: String) {
+        let _ = summary;
+    }
 }
 
 /// The desktop's own notifications, shown one at a time by a task of their own.
 #[derive(Debug)]
 pub struct DesktopNotifier {
-    queue: mpsc::Sender<Received>,
+    queue: mpsc::Sender<(String, &'static str)>,
 }
 
 /// Notifications waiting to be shown. When clips arrive faster, the extra ones are skipped.
@@ -54,15 +59,16 @@ const QUEUE: usize = 4;
 const SHOWN_FOR_MS: i32 = 4000;
 
 const BODY: &str = "Ready to paste.";
+const NOTICE_BODY: &str = "paste-get";
 
 impl DesktopNotifier {
     /// Starts the notification task. Call from within the Tokio runtime.
     pub fn start() -> Self {
-        let (queue, mut received) = mpsc::channel::<Received>(QUEUE);
+        let (queue, mut shown) = mpsc::channel::<(String, &'static str)>(QUEUE);
         tokio::spawn(async move {
             let mut desktop = platform::Desktop::new();
-            while let Some(clip) = received.recv().await {
-                if let Err(e) = desktop.show(&clip).await {
+            while let Some((summary, body)) = shown.recv().await {
+                if let Err(e) = desktop.show(summary, body).await {
                     tracing::debug!(error = %e, "notification not shown");
                 }
             }
@@ -73,7 +79,11 @@ impl DesktopNotifier {
 
 impl Notifier for DesktopNotifier {
     fn received(&self, received: Received) {
-        let _ = self.queue.try_send(received);
+        let _ = self.queue.try_send((received.summary(), BODY));
+    }
+
+    fn notice(&self, summary: String) {
+        let _ = self.queue.try_send((summary, NOTICE_BODY));
     }
 }
 
@@ -84,7 +94,7 @@ mod platform {
 
     use zbus::{Connection, Variant};
 
-    use super::{BODY, Received, SHOWN_FOR_MS};
+    use super::SHOWN_FOR_MS;
 
     pub struct Desktop {
         /// Opened on first use, and again after an error.
@@ -96,7 +106,7 @@ mod platform {
             Self { connection: None }
         }
 
-        pub async fn show(&mut self, received: &Received) -> zbus::Result<()> {
+        pub async fn show(&mut self, summary: String, body: &str) -> zbus::Result<()> {
             let connection = match &self.connection {
                 Some(connection) => connection.clone(),
                 None => Connection::session().await?,
@@ -115,8 +125,8 @@ mod platform {
                         "paste-get",
                         0u32,
                         "edit-paste",
-                        received.summary(),
-                        BODY,
+                        summary,
+                        body,
                         Vec::<&str>::new(),
                         hints,
                         SHOWN_FOR_MS,
@@ -132,7 +142,7 @@ mod platform {
 /// Windows toasts and macOS notifications.
 #[cfg(any(windows, target_os = "macos"))]
 mod platform {
-    use super::{BODY, Received, SHOWN_FOR_MS};
+    use super::SHOWN_FOR_MS;
 
     pub struct Desktop;
 
@@ -141,13 +151,12 @@ mod platform {
             Self
         }
 
-        pub async fn show(&mut self, received: &Received) -> anyhow::Result<()> {
-            let summary = received.summary();
+        pub async fn show(&mut self, summary: String, body: &'static str) -> anyhow::Result<()> {
             tokio::task::spawn_blocking(move || {
                 notify_rust::Notification::new()
                     .appname("paste-get")
                     .summary(&summary)
-                    .body(BODY)
+                    .body(body)
                     .timeout(notify_rust::Timeout::Milliseconds(
                         SHOWN_FOR_MS.unsigned_abs(),
                     ))

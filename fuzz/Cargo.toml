@@ -11,6 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 pasteget-core = { path = "../core" }
+pasteget-desktop = { path = "../desktop" }
 
 # Kept out of the main workspace: fuzzing needs a nightly toolchain.
 [workspace]
@@ -32,6 +33,13 @@ bench = false
 [[bin]]
 name = "clip_receiver"
 path = "fuzz_targets/clip_receiver.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hotkey"
+path = "fuzz_targets/hotkey.rs"
 test = false
 doc = false
 bench = false

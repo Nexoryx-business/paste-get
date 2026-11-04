@@ -43,6 +43,8 @@ pub enum Request {
         mime_type: String,
         data_base64: String,
     },
+    /// Sends what's on the clipboard now, even while paused.
+    SendClipboard,
     /// Pauses (`true`) or resumes (`false`) syncing. `None` toggles.
     Pause {
         paused: Option<bool>,
@@ -350,6 +352,12 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
                     .write_all(line_of(Response::Sent { devices }).as_bytes())
                     .await?;
             }
+            Request::SendClipboard => {
+                let devices = daemon.send_clipboard().await?;
+                write_half
+                    .write_all(line_of(Response::Sent { devices }).as_bytes())
+                    .await?;
+            }
             Request::Pause { paused } => {
                 let paused = daemon.set_paused(paused.unwrap_or(!daemon.is_paused()));
                 write_half
@@ -460,6 +468,7 @@ mod tests {
             poll_interval: Duration::from_millis(10),
             announce: false,
             notifier: None,
+            hotkeys: false,
         };
         let daemon = Arc::new(
             Daemon::start(profile.clone(), clipboard.clone(), options)
@@ -588,6 +597,8 @@ mod tests {
         assert_eq!(clips[0].from, None);
 
         pc.clipboard.set(Raw::Text("something else".into()));
+        let sent = ask(&pc.endpoint, Request::SendClipboard).await;
+        assert!(matches!(&sent[..], [Response::Sent { devices: 0 }]));
         let copied = ask(&pc.endpoint, Request::CopyRecent { id: clips[0].id }).await;
         assert!(matches!(&copied[..], [Response::Copied]));
         for _ in 0..300 {

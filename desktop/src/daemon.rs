@@ -32,6 +32,7 @@ use tokio::time::{sleep, timeout};
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
 use crate::config::{KnownDevice, KnownDevices, NotifyFor, Profile};
 use crate::discovery::Advertiser;
+use crate::hotkeys::{self, Action, Hotkeys};
 use crate::notify::{Notifier, Received};
 use crate::recent::{RecentClip, RecentClips};
 
@@ -50,6 +51,8 @@ pub struct DaemonOptions {
     pub announce: bool,
     /// Shows "Image from … ✓" when a clip lands on the clipboard, as `settings.toml` asks.
     pub notifier: Option<Arc<dyn Notifier>>,
+    /// Register the global hotkeys of `settings.toml`.
+    pub hotkeys: bool,
 }
 
 impl DaemonOptions {
@@ -60,6 +63,7 @@ impl DaemonOptions {
             poll_interval: DEFAULT_POLL_INTERVAL,
             announce: true,
             notifier: None,
+            hotkeys: false,
         }
     }
 }
@@ -94,6 +98,7 @@ pub struct Daemon {
     shared: Arc<Shared>,
     local_addr: SocketAddr,
     _advertiser: Option<Advertiser>,
+    _hotkeys: Option<Hotkeys>,
 }
 
 struct Shared {
@@ -187,10 +192,19 @@ impl Daemon {
             announced = advertiser.is_some(),
             "daemon started"
         );
+        let hotkeys = if options.hotkeys {
+            let (pressed, presses) = mpsc::channel(4);
+            shared.spawn(hotkey_loop(Arc::clone(&shared), presses));
+            hotkeys::start(&settings.hotkeys.bindings(), pressed)
+        } else {
+            None
+        };
+
         Ok(Self {
             shared,
             local_addr,
             _advertiser: advertiser,
+            _hotkeys: hotkeys,
         })
     }
 
@@ -267,20 +281,25 @@ impl Daemon {
         self.shared.peers.broadcast(&clip, None)
     }
 
+    /// Sends what's on the clipboard now, even while paused. Returns how many devices it was
+    /// queued for.
+    pub async fn send_clipboard(&self) -> Result<usize> {
+        self.shared.send_clipboard().await
+    }
+
     /// Pauses or resumes syncing. While paused, local copies aren't sent and clips from devices
     /// aren't applied. Returns the new state.
     pub fn set_paused(&self, paused: bool) -> bool {
-        self.shared.paused.store(paused, Ordering::Relaxed);
-        tracing::info!(
-            paused,
-            "syncing {}",
-            if paused { "paused" } else { "resumed" }
-        );
-        paused
+        self.shared.set_paused(paused)
     }
 
     pub fn is_paused(&self) -> bool {
         self.shared.paused.load(Ordering::Relaxed)
+    }
+
+    /// Does what a hotkey does, and says so in a notification.
+    pub async fn perform(&self, action: Action) {
+        self.shared.perform(action).await;
     }
 
     /// The last clips that went through, newest first.
@@ -373,6 +392,58 @@ impl Shared {
         ips.sort();
         ips.dedup();
         Ok(ips)
+    }
+
+    fn set_paused(&self, paused: bool) -> bool {
+        self.paused.store(paused, Ordering::Relaxed);
+        tracing::info!(
+            paused,
+            "syncing {}",
+            if paused { "paused" } else { "resumed" }
+        );
+        paused
+    }
+
+    async fn send_clipboard(&self) -> Result<usize> {
+        let content = self
+            .clipboard
+            .read()
+            .await?
+            .context("the clipboard is empty, or holds something that can't be sent")?;
+        let clip = Clip {
+            mime_type: content.mime_type,
+            data: content.data,
+            sensitive: content.sensitive,
+            origin: self.identity.device_id(),
+        };
+        self.remember_clip(&clip, None);
+        let sent_to = self.peers.broadcast(&clip, None);
+        tracing::info!(mime_type = %clip.mime_type, len = clip.data.len(), sent_to, "clipboard sent");
+        Ok(sent_to)
+    }
+
+    async fn perform(&self, action: Action) {
+        let summary = match action {
+            Action::TogglePause => {
+                if self.set_paused(!self.paused.load(Ordering::Relaxed)) {
+                    "Syncing paused".to_owned()
+                } else {
+                    "Syncing resumed".to_owned()
+                }
+            }
+            Action::SendClipboard => match self.send_clipboard().await {
+                Ok(0) => "No device is connected".to_owned(),
+                Ok(1) => "Clipboard sent to 1 device".to_owned(),
+                Ok(n) => format!("Clipboard sent to {n} devices"),
+                Err(e) => {
+                    tracing::info!(error = %e, "clipboard not sent");
+                    "Nothing to send".to_owned()
+                }
+            },
+        };
+        if let Some(notifier) = &self.notifier {
+            notifier.notice(summary);
+        }
     }
 
     /// Adds a clip to the recent list. Sensitive clips are not kept.
@@ -532,6 +603,13 @@ async fn dial_loop(shared: Arc<Shared>, device: KnownDevice) {
     .await;
 }
 
+async fn hotkey_loop(shared: Arc<Shared>, mut presses: mpsc::Receiver<Action>) {
+    while let Some(action) = presses.recv().await {
+        tracing::info!(action = action.id(), "hotkey pressed");
+        shared.perform(action).await;
+    }
+}
+
 /// Sends local clipboard changes to every connected device.
 async fn local_changes_loop(shared: Arc<Shared>, mut changes: mpsc::Receiver<Content>) {
     while let Some(content) = changes.recv().await {
@@ -568,11 +646,15 @@ mod tests {
     }
 
     #[derive(Debug, Default)]
-    struct Notifications(Mutex<Vec<Received>>);
+    struct Notifications(Mutex<Vec<Received>>, Mutex<Vec<String>>);
 
     impl Notifier for Notifications {
         fn received(&self, received: Received) {
             self.0.lock().unwrap().push(received);
+        }
+
+        fn notice(&self, summary: String) {
+            self.1.lock().unwrap().push(summary);
         }
     }
 
@@ -592,6 +674,7 @@ mod tests {
             poll_interval: Duration::from_millis(10),
             announce: false,
             notifier: Some(Arc::clone(&notifications) as Arc<dyn Notifier>),
+            hotkeys: false,
         };
         let daemon = Daemon::start(profile, clipboard.clone(), options)
             .await
@@ -786,6 +869,48 @@ mod tests {
         );
 
         assert!(pc.daemon.copy_recent(999).is_err());
+    }
+
+    #[tokio::test]
+    async fn hotkey_actions_pause_and_send_the_clipboard() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+
+        pc.daemon.perform(Action::TogglePause).await;
+        assert!(pc.daemon.is_paused());
+
+        // Paused: copies stay here until sent on purpose.
+        pc.clipboard.set(Raw::Text("only when I say so".into()));
+        sleep(Duration::from_millis(100)).await;
+        assert_eq!(laptop.clipboard.get(), None);
+        pc.daemon.perform(Action::SendClipboard).await;
+        assert!(
+            wait_for(|| laptop.clipboard.get() == Some(Raw::Text("only when I say so".into())))
+                .await
+        );
+
+        pc.daemon.perform(Action::TogglePause).await;
+        assert!(!pc.daemon.is_paused());
+        assert_eq!(
+            *pc.notifications.1.lock().unwrap(),
+            [
+                "Syncing paused",
+                "Clipboard sent to 1 device",
+                "Syncing resumed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn sending_an_empty_clipboard_fails() {
+        let pc = start("pc").await;
+
+        assert!(pc.daemon.send_clipboard().await.is_err());
+        pc.daemon.perform(Action::SendClipboard).await;
+        assert_eq!(*pc.notifications.1.lock().unwrap(), ["Nothing to send"]);
     }
 
     async fn wait_for_async<F: Future<Output = bool>>(mut condition: impl FnMut() -> F) -> bool {

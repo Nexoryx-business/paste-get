@@ -89,6 +89,7 @@ fn start_pc_in(home: tempfile::TempDir) -> Pc {
         poll_interval: Duration::from_millis(10),
         announce: false,
         notifier: None,
+        hotkeys: false,
     };
     let daemon = runtime
         .block_on(Daemon::start(profile, clipboard.clone(), options))

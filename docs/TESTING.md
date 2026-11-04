@@ -3,7 +3,8 @@
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
 section 6 automatic screenshots, section 7 the way back, from the PC to the phone, section 8
-the automatic copy on the phone, section 9 the tray app and section 10 starting at login.
+the automatic copy on the phone, section 9 the tray app, section 10 starting at login and
+section 11 the hotkeys.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -306,7 +307,54 @@ It starts the program the checkbox was ticked from, so tick it again after movin
 | L3 | Untick it, log out and in | No paste-get icon; the entry is gone |
 | L4 | Hyprland: add the `exec-once` line, log out and in | The icon is in Waybar's tray |
 
+## 11. Hotkeys (M7)
 
+Two global hotkeys work in every app, with `pasteget daemon` or the tray running:
+
+| Hotkey | Does | Same as |
+|---|---|---|
+| `Ctrl+Alt+Shift+P` | Pause or resume syncing | `pasteget pause --toggle` |
+| `Ctrl+Alt+Shift+V` | Send the clipboard now, even while paused | `pasteget send --clipboard` |
+
+Each press shows a short notification ("Syncing paused", "Clipboard sent to 1 device"…). Pause
+plus *send the clipboard* gives a private mode: nothing leaves the PC unless you press the key.
+
+Change them in `settings.toml`, then restart paste-get. A letter, a digit or `F1`–`F24`, after
+`Ctrl`, `Alt`, `Shift` and/or `Super`; an empty string turns a hotkey off:
+```toml
+[hotkeys]
+toggle_pause = "Ctrl+Alt+Shift+P"
+send_clipboard = ""
+```
+Why Shift: on Windows, `Ctrl+Alt` is also `AltGr`, which types `@`, `€` and others on many
+keyboard layouts. A hotkey on `Ctrl+Alt+V` would swallow them.
+
+How each desktop gets them:
+- **Windows:** registered directly. If another app already uses one, the log says
+  `hotkey not registered: another app uses it`: pick another in `settings.toml`.
+- **KDE Plasma:** through the desktop portal's global shortcuts. The first time, Plasma may ask
+  to allow them; afterwards they're in System Settings → *Shortcuts*, where they can be changed.
+  The log says `hotkey registered … trigger=…` for each. *(verify: Plasma may need paste-get
+  installed with a desktop file to list it by name.)* If the log says `hotkeys not available`
+  instead, add them as custom shortcuts in System Settings → *Shortcuts* → *Add New* → *Command*,
+  with the commands above.
+- **Hyprland:** paste-get doesn't register anything; the log prints the lines to add to
+  `~/.config/hypr/hyprland.conf`:
+  ```
+  bind = CTRL ALT SHIFT, P, exec, pasteget pause --toggle
+  bind = CTRL ALT SHIFT, V, exec, pasteget send --clipboard
+  ```
+  (with the full path of `pasteget` if it isn't on your `PATH`).
+
+| # | Do this | Expected |
+|---|---|---|
+| H1 | Start paste-get, look at its log | Windows / KDE: `hotkey registered` twice. Hyprland: the two `bind` lines |
+| H2 | Press `Ctrl+Alt+Shift+P` (KDE: allow the shortcuts first if asked) | Notification "Syncing paused"; the tray icon turns grey |
+| H3 | Copy some text, then press `Ctrl+Alt+Shift+V` | "Clipboard sent to 1 device"; the fake phone logs `clip received` |
+| H4 | Press `Ctrl+Alt+Shift+P` again | "Syncing resumed" |
+| H5 | On a layout with `AltGr` (Albanian, German, Polish…), type `@` in a text editor | It types normally |
+
+## Known limitations
 
 - If the PC changes address while the phone is connected, the phone notices only when the old
   connection times out (up to 90 s), then finds it again by mDNS. Phones that can't receive
@@ -323,4 +371,6 @@ It starts the program the checkbox was ticked from, so tick it again after movin
 - The identity key is a file readable only by your user, not yet in the OS keystore.
 - The tray's *Recent* list is in memory only, holds the last 10 clips, and forgets them when the
   daemon stops. Sensitive clips (passwords) never appear in it. Pausing doesn't survive a restart.
+- Hotkeys are read from `settings.toml` at start: restart paste-get after changing them. On
+  GNOME and other desktops without the global shortcuts portal, bind the commands yourself.
 - Text and images only (PNG and JPEG on the wire). Copying a file in a file manager isn't synced.

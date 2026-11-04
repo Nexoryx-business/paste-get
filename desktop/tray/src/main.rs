@@ -280,6 +280,7 @@ impl Tray {
         let settings = self.profile.settings()?;
         let mut options = DaemonOptions::listen_on(settings.port);
         options.notifier = Some(Arc::new(DesktopNotifier::start()));
+        options.hotkeys = true;
         let daemon =
             Arc::new(Daemon::start(self.profile.clone(), SystemClipboard::new()?, options).await?);
         let server = control::serve(Arc::clone(&daemon), &self.endpoint).await?;
