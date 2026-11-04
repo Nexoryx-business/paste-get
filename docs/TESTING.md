@@ -83,6 +83,8 @@ Watch terminal 2 (the fake phone): each clip it receives logs `clip received …
 | 5 | After step 2, wait 5 s | Terminal 1 does **not** log `local copy` for it (no echo) |
 | 6 | Leave an image on the clipboard for a minute | `pasteget` stays under a few % CPU (Task Manager / `htop`) |
 | 7 | Stop terminal 2 (Ctrl+C), start it again | Terminal 1 logs `connected` again within ~30 s |
+| 8 | `pasteget pause`, copy some text, then `pasteget --profile phone send "hi"` | Terminal 1 logs `local copy not sent: paused` and `clip dropped: paused`; `Ctrl+V` doesn't paste `hi`. `pasteget resume` brings syncing back |
+| 9 | `pasteget recent` | The last clips, newest first, with where they came from |
 
 Screenshot to clipboard:
 - **Windows:** `Win+Shift+S`
@@ -94,11 +96,11 @@ Screenshot to clipboard:
 For each environment (Windows 11, KDE Plasma Wayland, Hyprland), report which rows passed. For
 failures, attach the output of terminals 1 and 2 and of `pasteget status`.
 
-| Environment | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-|---|---|---|---|---|---|---|---|
-| Windows 11 | | | | | | | |
-| KDE Plasma 6 (Wayland) | | | | | | | |
-| Hyprland | | | | | | | |
+| Environment | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| Windows 11 | | | | | | | | | |
+| KDE Plasma 6 (Wayland) | | | | | | | | | |
+| Hyprland | | | | | | | | | |
 
 ## 5. The phone (M3)
 

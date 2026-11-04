@@ -12,8 +12,9 @@
 //! code (`pasteget join`) are dialed out and redialed after disconnects.
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 use pasteget_core::clip::{Clip, mime};
@@ -32,6 +33,7 @@ use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL
 use crate::config::{KnownDevice, KnownDevices, NotifyFor, Profile};
 use crate::discovery::Advertiser;
 use crate::notify::{Notifier, Received};
+use crate::recent::{RecentClip, RecentClips};
 
 /// Time a not-yet-paired device has to send its pairing request.
 const PAIRING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -77,6 +79,8 @@ pub struct Status {
     pub listening_on: SocketAddr,
     pub devices: Vec<DeviceStatus>,
     pub pairing_open: bool,
+    /// Nothing is sent or received while paused, except what is sent explicitly.
+    pub paused: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +109,8 @@ struct Shared {
     clipboard: ClipboardWatcher,
     notifier: Option<Arc<dyn Notifier>>,
     notify_for: NotifyFor,
+    paused: AtomicBool,
+    recent: Mutex<RecentClips>,
     events: broadcast::Sender<Event>,
     tasks: Mutex<JoinSet<()>>,
 }
@@ -141,6 +147,8 @@ impl Daemon {
             clipboard,
             notifier: options.notifier,
             notify_for: settings.notify,
+            paused: AtomicBool::new(false),
+            recent: Mutex::new(RecentClips::default()),
             events,
             tasks: Mutex::new(JoinSet::new()),
         });
@@ -246,7 +254,8 @@ impl Daemon {
         Err(last_error)
     }
 
-    /// Sends content to every connected device. Returns how many it was queued for.
+    /// Sends content to every connected device, even while paused. Returns how many it was
+    /// queued for.
     pub fn send(&self, content: Content) -> usize {
         let clip = Clip {
             mime_type: content.mime_type,
@@ -254,7 +263,42 @@ impl Daemon {
             sensitive: content.sensitive,
             origin: self.device_id(),
         };
+        self.shared.remember_clip(&clip, None);
         self.shared.peers.broadcast(&clip, None)
+    }
+
+    /// Pauses or resumes syncing. While paused, local copies aren't sent and clips from devices
+    /// aren't applied. Returns the new state.
+    pub fn set_paused(&self, paused: bool) -> bool {
+        self.shared.paused.store(paused, Ordering::Relaxed);
+        tracing::info!(
+            paused,
+            "syncing {}",
+            if paused { "paused" } else { "resumed" }
+        );
+        paused
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.shared.paused.load(Ordering::Relaxed)
+    }
+
+    /// The last clips that went through, newest first.
+    pub fn recent(&self) -> Vec<RecentClip> {
+        lock(&self.shared.recent).list()
+    }
+
+    /// Puts a recent clip back on the clipboard. It isn't sent again: the devices had it.
+    pub fn copy_recent(&self, id: u64) -> Result<()> {
+        let clip = lock(&self.shared.recent)
+            .get(id)
+            .context("that clip is no longer in the recent list")?;
+        let content = Content {
+            mime_type: clip.mime_type,
+            data: clip.data.to_vec(),
+            sensitive: false,
+        };
+        self.shared.clipboard.write(content, |_| {})
     }
 
     pub async fn status(&self) -> Status {
@@ -279,6 +323,7 @@ impl Daemon {
             listening_on: self.local_addr,
             devices,
             pairing_open,
+            paused: self.is_paused(),
         }
     }
 }
@@ -330,6 +375,21 @@ impl Shared {
         Ok(ips)
     }
 
+    /// Adds a clip to the recent list. Sensitive clips are not kept.
+    fn remember_clip(&self, clip: &Clip, from: Option<DeviceId>) {
+        if clip.sensitive {
+            return;
+        }
+        let from = from.map(|id| self.name_of(&id));
+        lock(&self.recent).push(&clip.mime_type, &clip.data, from, SystemTime::now());
+    }
+
+    fn name_of(&self, id: &DeviceId) -> String {
+        lock(&self.known)
+            .get(id)
+            .map_or_else(|| "a paired device".to_owned(), |d| d.name.clone())
+    }
+
     fn remember(&self, device: KnownDevice) -> Result<()> {
         let mut known = lock(&self.known);
         known.insert(device);
@@ -352,13 +412,16 @@ impl SessionEvents for Shared {
         if !lock(&self.guard).accepts_origin(&clip.origin) {
             return;
         }
+        if self.paused.load(Ordering::Relaxed) {
+            tracing::info!(mime_type = %clip.mime_type, len = clip.data.len(), "clip dropped: paused");
+            return;
+        }
         lock(&self.guard).applied_remote(&clip);
+        self.remember_clip(&clip, Some(peer));
 
         let received = Received {
             image: clip.mime_type != mime::TEXT,
-            from: lock(&self.known)
-                .get(&peer)
-                .map_or_else(|| "a paired device".to_owned(), |d| d.name.clone()),
+            from: self.name_of(&peer),
         };
         // Sensitive clips stay as quiet as possible.
         let notifier = self
@@ -475,12 +538,17 @@ async fn local_changes_loop(shared: Arc<Shared>, mut changes: mpsc::Receiver<Con
         if !lock(&shared.guard).should_send(&content.mime_type, &content.data) {
             continue;
         }
+        if shared.paused.load(Ordering::Relaxed) {
+            tracing::info!(mime_type = %content.mime_type, len = content.data.len(), "local copy not sent: paused");
+            continue;
+        }
         let clip = Clip {
             mime_type: content.mime_type,
             data: content.data,
             sensitive: content.sensitive,
             origin: shared.identity.device_id(),
         };
+        shared.remember_clip(&clip, None);
         let sent_to = shared.peers.broadcast(&clip, None);
         tracing::info!(mime_type = %clip.mime_type, len = clip.data.len(), sent_to, "local copy");
     }
@@ -645,6 +713,79 @@ mod tests {
                 == Some(Raw::Text("sent with pasteget send".into())))
             .await
         );
+    }
+
+    #[tokio::test]
+    async fn nothing_syncs_while_paused() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+        assert!(wait_for_async(|| connected(&laptop.daemon)).await);
+
+        assert!(pc.daemon.set_paused(true));
+        assert!(pc.daemon.status().await.paused);
+
+        // Copies on the paused PC stay there.
+        pc.clipboard.set(Raw::Text("private".into()));
+        sleep(Duration::from_millis(200)).await;
+        assert_eq!(laptop.clipboard.get(), None);
+
+        // Clips sent to the paused PC are dropped.
+        laptop.clipboard.set(Raw::Text("from the laptop".into()));
+        sleep(Duration::from_millis(200)).await;
+        assert_eq!(pc.clipboard.get(), Some(Raw::Text("private".into())));
+        assert!(pc.daemon.recent().is_empty());
+
+        // An explicit send still goes out.
+        assert_eq!(
+            pc.daemon.send(Content {
+                mime_type: mime::TEXT.into(),
+                data: b"on purpose".to_vec(),
+                sensitive: false,
+            }),
+            1
+        );
+        assert!(wait_for(|| laptop.clipboard.get() == Some(Raw::Text("on purpose".into()))).await);
+
+        // Resumed: copies flow again.
+        assert!(!pc.daemon.set_paused(false));
+        pc.clipboard.set(Raw::Text("public".into()));
+        assert!(wait_for(|| laptop.clipboard.get() == Some(Raw::Text("public".into()))).await);
+    }
+
+    #[tokio::test]
+    async fn recent_clips_can_be_copied_again() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+        assert!(wait_for_async(|| connected(&laptop.daemon)).await);
+
+        pc.clipboard.set(Raw::Text("copied here".into()));
+        assert!(wait_for(|| laptop.clipboard.get() == Some(Raw::Text("copied here".into()))).await);
+        laptop.clipboard.set(Raw::Text("from the laptop".into()));
+        assert!(wait_for(|| pc.clipboard.get() == Some(Raw::Text("from the laptop".into()))).await);
+
+        let recent = pc.daemon.recent();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(&*recent[0].data, b"from the laptop");
+        assert_eq!(recent[0].from.as_deref(), Some("laptop"));
+        assert_eq!(&*recent[1].data, b"copied here");
+        assert_eq!(recent[1].from, None);
+
+        pc.daemon.copy_recent(recent[1].id).unwrap();
+        assert!(wait_for(|| pc.clipboard.get() == Some(Raw::Text("copied here".into()))).await);
+        // Not sent again: the laptop keeps its own copy.
+        sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            laptop.clipboard.get(),
+            Some(Raw::Text("from the laptop".into()))
+        );
+
+        assert!(pc.daemon.copy_recent(999).is_err());
     }
 
     async fn wait_for_async<F: Future<Output = bool>>(mut condition: impl FnMut() -> F) -> bool {

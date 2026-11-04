@@ -9,3 +9,4 @@ pub mod control;
 pub mod daemon;
 pub mod discovery;
 pub mod notify;
+pub mod recent;

@@ -65,6 +65,17 @@ enum Command {
     },
     /// Show this device and its paired devices.
     Status,
+    /// Stop sending copies and receiving clips until `pasteget resume`.
+    /// `pasteget send` still works while paused.
+    Pause {
+        /// Resume instead if already paused. Handy for a hotkey.
+        #[arg(long)]
+        toggle: bool,
+    },
+    /// Resume syncing after `pasteget pause`.
+    Resume,
+    /// List the last clips sent or received, newest first.
+    Recent,
 }
 
 #[tokio::main]
@@ -91,6 +102,9 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Join { invite } => join(&endpoint, invite).await,
         Command::Send { text, file } => send(&endpoint, text, file).await,
         Command::Status => status(&endpoint).await,
+        Command::Pause { toggle } => pause(&endpoint, if toggle { None } else { Some(true) }).await,
+        Command::Resume => pause(&endpoint, Some(false)).await,
+        Command::Recent => recent(&endpoint).await,
     }
 }
 
@@ -242,6 +256,9 @@ async fn status(endpoint: &Endpoint) -> Result<()> {
         if status.pairing_open {
             println!("  Pairing:   a pairing code is being shown");
         }
+        if status.paused {
+            println!("  Paused:    nothing is synced until `pasteget resume`");
+        }
         if status.devices.is_empty() {
             println!("No paired device. Run `pasteget pair` to add one.");
         } else {
@@ -258,6 +275,79 @@ async fn status(endpoint: &Endpoint) -> Result<()> {
         true
     })
     .await
+}
+
+async fn pause(endpoint: &Endpoint, paused: Option<bool>) -> Result<()> {
+    expect_one(
+        endpoint,
+        &Request::Pause { paused },
+        |response| match response {
+            Response::Paused { paused: true } => {
+                println!("Paused: nothing is synced until `pasteget resume`.");
+                true
+            }
+            Response::Paused { paused: false } => {
+                println!("Syncing.");
+                true
+            }
+            _ => false,
+        },
+    )
+    .await
+}
+
+async fn recent(endpoint: &Endpoint) -> Result<()> {
+    expect_one(endpoint, &Request::Recent, |response| {
+        let Response::Recent { clips } = response else {
+            return false;
+        };
+        if clips.is_empty() {
+            println!("Nothing yet.");
+        }
+        for clip in clips {
+            println!(
+                "{:>8}  {:<20}  {}",
+                ago(clip.age_secs),
+                clip.from.as_deref().unwrap_or("this computer"),
+                describe(&clip)
+            );
+        }
+        true
+    })
+    .await
+}
+
+/// "Text: hello world" or "Image (PNG, 1.2 MB)".
+fn describe(clip: &control::RecentReply) -> String {
+    match &clip.preview {
+        Some(preview) => format!("Text: {preview}"),
+        None => {
+            let kind = clip
+                .mime_type
+                .strip_prefix("image/")
+                .map_or(clip.mime_type.clone(), str::to_uppercase);
+            format!("Image ({kind}, {})", size(clip.len))
+        }
+    }
+}
+
+fn size(len: usize) -> String {
+    let len = len as f64;
+    if len < 1024.0 {
+        format!("{len} B")
+    } else if len < 1024.0 * 1024.0 {
+        format!("{:.0} KB", len / 1024.0)
+    } else {
+        format!("{:.1} MB", len / (1024.0 * 1024.0))
+    }
+}
+
+fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min", secs / 60),
+        _ => format!("{} h", secs / 3600),
+    }
 }
 
 /// Sends a one-answer request. `on_success` returns `false` for unexpected answers.

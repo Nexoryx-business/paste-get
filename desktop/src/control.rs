@@ -12,10 +12,11 @@
 #[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use data_encoding::BASE64;
+use pasteget_core::clip::mime;
 use pasteget_core::pairing::{PAIRING_TTL, PairingInvite};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -25,6 +26,7 @@ use tokio::task::JoinHandle;
 use crate::clipboard::Content;
 use crate::config::Profile;
 use crate::daemon::{Daemon, Event};
+use crate::recent;
 
 /// Longest request line accepted: a 64 MiB clip, base64-encoded, plus some room.
 const MAX_REQUEST_LEN: u64 = 96 * 1024 * 1024;
@@ -41,6 +43,15 @@ pub enum Request {
         mime_type: String,
         data_base64: String,
     },
+    /// Pauses (`true`) or resumes (`false`) syncing. `None` toggles.
+    Pause {
+        paused: Option<bool>,
+    },
+    Recent,
+    /// Puts a clip from [`Request::Recent`] back on the clipboard.
+    CopyRecent {
+        id: u64,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +63,9 @@ pub enum Response {
     Paired(DeviceReply),
     Joined(DeviceReply),
     Sent { devices: usize },
+    Paused { paused: bool },
+    Recent { clips: Vec<RecentReply> },
+    Copied,
     Error { message: String },
 }
 
@@ -61,6 +75,8 @@ pub struct StatusReply {
     pub device_name: String,
     pub listening_on: String,
     pub pairing_open: bool,
+    #[serde(default)]
+    pub paused: bool,
     pub devices: Vec<DeviceStatusReply>,
 }
 
@@ -69,6 +85,18 @@ pub struct DeviceStatusReply {
     pub id: String,
     pub name: String,
     pub connected: bool,
+}
+
+/// A recent clip. Only text clips have a preview.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentReply {
+    pub id: u64,
+    pub mime_type: String,
+    pub len: usize,
+    /// The device it came from; `None` for copies made on this computer.
+    pub from: Option<String>,
+    pub age_secs: u64,
+    pub preview: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -232,6 +260,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
                     device_name: status.device_name,
                     listening_on: status.listening_on.to_string(),
                     pairing_open: status.pairing_open,
+                    paused: status.paused,
                     devices: status
                         .devices
                         .into_iter()
@@ -305,6 +334,37 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
                     .write_all(line_of(Response::Sent { devices }).as_bytes())
                     .await?;
             }
+            Request::Pause { paused } => {
+                let paused = daemon.set_paused(paused.unwrap_or(!daemon.is_paused()));
+                write_half
+                    .write_all(line_of(Response::Paused { paused }).as_bytes())
+                    .await?;
+            }
+            Request::Recent => {
+                let now = SystemTime::now();
+                let clips = daemon
+                    .recent()
+                    .into_iter()
+                    .map(|clip| RecentReply {
+                        id: clip.id,
+                        len: clip.data.len(),
+                        age_secs: now.duration_since(clip.at).unwrap_or_default().as_secs(),
+                        preview: (clip.mime_type == mime::TEXT)
+                            .then(|| recent::preview(&String::from_utf8_lossy(&clip.data))),
+                        mime_type: clip.mime_type,
+                        from: clip.from,
+                    })
+                    .collect();
+                write_half
+                    .write_all(line_of(Response::Recent { clips }).as_bytes())
+                    .await?;
+            }
+            Request::CopyRecent { id } => {
+                daemon.copy_recent(id)?;
+                write_half
+                    .write_all(line_of(Response::Copied).as_bytes())
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -364,7 +424,6 @@ mod tests {
     use super::*;
     use crate::clipboard::{MemoryClipboard, Raw};
     use crate::daemon::DaemonOptions;
-    use pasteget_core::clip::mime;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     struct Running {
@@ -475,6 +534,59 @@ mod tests {
         };
         assert_eq!(status.devices.len(), 1);
         assert!(status.devices[0].connected);
+    }
+
+    #[tokio::test]
+    async fn pause_and_recent_through_the_control_channel() {
+        let pc = run("pc").await;
+
+        let paused = ask(&pc.endpoint, Request::Pause { paused: None }).await;
+        assert!(matches!(&paused[..], [Response::Paused { paused: true }]));
+        let status = ask(&pc.endpoint, Request::Status).await;
+        assert!(matches!(&status[..], [Response::Status(s)] if s.paused));
+        let resumed = ask(
+            &pc.endpoint,
+            Request::Pause {
+                paused: Some(false),
+            },
+        )
+        .await;
+        assert!(matches!(&resumed[..], [Response::Paused { paused: false }]));
+
+        // An explicit send is remembered even with no device connected.
+        ask(
+            &pc.endpoint,
+            Request::Send {
+                mime_type: mime::TEXT.into(),
+                data_base64: BASE64.encode(b"  remember\nme  "),
+            },
+        )
+        .await;
+        let recent = ask(&pc.endpoint, Request::Recent).await;
+        let [Response::Recent { clips }] = &recent[..] else {
+            panic!("expected the recent clips");
+        };
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].preview.as_deref(), Some("remember me"));
+        assert_eq!(clips[0].len, 15);
+        assert_eq!(clips[0].from, None);
+
+        pc.clipboard.set(Raw::Text("something else".into()));
+        let copied = ask(&pc.endpoint, Request::CopyRecent { id: clips[0].id }).await;
+        assert!(matches!(&copied[..], [Response::Copied]));
+        for _ in 0..300 {
+            if pc.clipboard.get() == Some(Raw::Text("  remember\nme  ".into())) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            pc.clipboard.get(),
+            Some(Raw::Text("  remember\nme  ".into()))
+        );
+
+        let gone = ask(&pc.endpoint, Request::CopyRecent { id: 999 }).await;
+        assert!(matches!(&gone[..], [Response::Error { .. }]));
     }
 
     #[test]
