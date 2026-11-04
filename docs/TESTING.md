@@ -3,7 +3,7 @@
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
 section 6 automatic screenshots, section 7 the way back, from the PC to the phone, section 8
-the automatic copy on the phone, and section 9 the tray app.
+the automatic copy on the phone, section 9 the tray app and section 10 starting at login.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -284,7 +284,29 @@ see its log). Keep the fake phone of section 2 running.
 Report which rows passed on Windows 11, KDE Plasma and Hyprland, and anything that looks wrong
 in the menu (cut-off text, missing ticks, a menu that closes by itself).
 
-## Known limitations
+## 10. Starting at login (M7)
+
+The tray's *Start at login* checkbox adds paste-get to the programs started when you log in:
+- **Windows:** the `Run` key of your user, listed in Task Manager → *Startup apps* as
+  "paste-get". Disabling it there wins over the checkbox, which then still shows ticked.
+- **KDE Plasma:** `~/.config/autostart/io.github.nexoryx.pasteget.desktop`, listed in System
+  Settings → *Autostart*.
+- **Hyprland** doesn't read `~/.config/autostart`. Add this line to `~/.config/hypr/hyprland.conf`
+  instead (with the full path if `pasteget-tray` isn't on your `PATH`), and leave the checkbox off:
+  ```
+  exec-once = pasteget-tray
+  ```
+
+It starts the program the checkbox was ticked from, so tick it again after moving the program.
+
+| # | Do this | Expected |
+|---|---|---|
+| L1 | Tick *Start at login* | Windows: "paste-get" appears in Task Manager → *Startup apps*. KDE: the file above exists and System Settings → *Autostart* lists paste-get |
+| L2 | Log out and back in (or restart) | The tray icon comes back by itself; `pasteget status` answers |
+| L3 | Untick it, log out and in | No paste-get icon; the entry is gone |
+| L4 | Hyprland: add the `exec-once` line, log out and in | The icon is in Waybar's tray |
+
+
 
 - If the PC changes address while the phone is connected, the phone notices only when the old
   connection times out (up to 90 s), then finds it again by mDNS. Phones that can't receive

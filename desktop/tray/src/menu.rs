@@ -7,6 +7,7 @@ use pasteget_desktop::control::{RecentReply, StatusReply};
 use pasteget_desktop::recent;
 
 pub const PAUSE: &str = "pause";
+pub const START_AT_LOGIN: &str = "start-at-login";
 pub const QUIT: &str = "quit";
 const RECENT_PREFIX: &str = "recent:";
 
@@ -73,6 +74,7 @@ pub enum Entry {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     TogglePause,
+    ToggleStartAtLogin,
     CopyRecent(u64),
     Quit,
 }
@@ -81,6 +83,7 @@ impl Command {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             PAUSE => Some(Self::TogglePause),
+            START_AT_LOGIN => Some(Self::ToggleStartAtLogin),
             QUIT => Some(Self::Quit),
             _ => id
                 .strip_prefix(RECENT_PREFIX)
@@ -90,22 +93,30 @@ impl Command {
     }
 }
 
-pub fn entries(state: &State) -> Vec<Entry> {
-    let quit = Entry::Action {
+/// The menu. `start_at_login` is `None` where that isn't supported.
+pub fn entries(state: &State, start_at_login: Option<bool>) -> Vec<Entry> {
+    let mut entries = daemon_entries(state);
+    entries.push(Entry::Separator);
+    if let Some(checked) = start_at_login {
+        entries.push(Entry::Check {
+            id: START_AT_LOGIN.into(),
+            label: "Start at login".into(),
+            checked,
+        });
+    }
+    entries.push(Entry::Action {
         id: QUIT.into(),
         label: "Quit".into(),
-    };
+    });
+    entries
+}
+
+fn daemon_entries(state: &State) -> Vec<Entry> {
     match state {
-        State::Starting => vec![
-            Entry::Info("paste-get is starting…".into()),
-            Entry::Separator,
-            quit,
-        ],
+        State::Starting => vec![Entry::Info("paste-get is starting…".into())],
         State::Down(reason) => vec![
             Entry::Info("paste-get is not running".into()),
             Entry::Info(text(reason)),
-            Entry::Separator,
-            quit,
         ],
         State::Running { status, recent } => {
             let mut entries = vec![
@@ -136,8 +147,6 @@ pub fn entries(state: &State) -> Vec<Entry> {
                 label: "Pause syncing".into(),
                 checked: status.paused,
             });
-            entries.push(Entry::Separator);
-            entries.push(quit);
             entries
         }
     }
@@ -228,7 +237,7 @@ mod tests {
         };
 
         assert_eq!(
-            labels(&entries(&state)),
+            labels(&entries(&state, Some(true))),
             [
                 "paste-get · Desk && Co (Linux)",
                 "Syncing with 1 device",
@@ -240,6 +249,7 @@ mod tests {
                 "Recent > Text: hello world · POCO M8 5G, 2 min | Image (JPEG, 1.2 MB) · this computer, 2 min",
                 "[ ] Pause syncing",
                 "---",
+                "[x] Start at login",
                 "Quit",
             ]
         );
@@ -253,7 +263,7 @@ mod tests {
         };
         assert!(paused.paused());
         assert_eq!(paused.summary(), "Paused");
-        let shown = labels(&entries(&paused));
+        let shown = labels(&entries(&paused, None));
         assert!(shown.contains(&"[x] Pause syncing".to_owned()));
         assert!(shown.contains(&"Recent > Nothing yet".to_owned()));
 
@@ -264,7 +274,7 @@ mod tests {
         assert!(!alone.paused());
         assert_eq!(alone.summary(), "No device connected");
         assert!(
-            labels(&entries(&alone))
+            labels(&entries(&alone, None))
                 .iter()
                 .any(|l| l.contains("pasteget pair"))
         );
@@ -274,7 +284,7 @@ mod tests {
     fn a_stopped_daemon_still_offers_quit() {
         let state = State::Down("could not listen on 0.0.0.0:47290: address in use".into());
 
-        let entries = entries(&state);
+        let entries = entries(&state, Some(false));
         assert!(!state.paused());
         assert_eq!(
             entries.last(),
@@ -284,12 +294,17 @@ mod tests {
             })
         );
         assert!(labels(&entries)[1].starts_with("could not listen"));
+        assert!(labels(&entries).contains(&"[ ] Start at login".to_owned()));
     }
 
     #[test]
     fn clicks_map_back_to_commands() {
         assert_eq!(Command::from_id(PAUSE), Some(Command::TogglePause));
         assert_eq!(Command::from_id(QUIT), Some(Command::Quit));
+        assert_eq!(
+            Command::from_id(START_AT_LOGIN),
+            Some(Command::ToggleStartAtLogin)
+        );
         assert_eq!(Command::from_id("recent:42"), Some(Command::CopyRecent(42)));
         assert_eq!(Command::from_id("recent:x"), None);
         assert_eq!(Command::from_id("other"), None);
@@ -309,7 +324,7 @@ mod tests {
                 })
                 .collect()
         }
-        for id in ids(&entries(&state)) {
+        for id in ids(&entries(&state, Some(false))) {
             assert!(Command::from_id(&id).is_some(), "{id}");
         }
     }

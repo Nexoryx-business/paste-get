@@ -78,7 +78,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 ### M7 — Tray app
 - [x] Tauri 2 tray: status, paired devices, pause, last items (`pasteget-tray`, runs the daemon
   in-process unless one already runs; `pasteget pause`, `resume` and `recent` on the command line)
-- [ ] Autostart on Windows and Linux
+- [x] Autostart on Windows and Linux: the tray's *Start at login* (`Run` key, XDG autostart;
+  `exec-once` on Hyprland, which ignores XDG autostart)
 - [ ] Hotkeys: `RegisterHotKey` (Windows), GlobalShortcuts portal (KDE), `bind … exec pasteget …` (Hyprland)
 
 ### M8 — Release 0.1

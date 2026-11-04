@@ -13,11 +13,13 @@
 mod menu;
 
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
+use pasteget_desktop::autostart::{self, Autostart, Launch};
 use pasteget_desktop::clipboard::SystemClipboard;
 use pasteget_desktop::config::{DEFAULT_PROFILE, Profile};
 use pasteget_desktop::control::{self, Endpoint, Request, Response};
@@ -57,8 +59,13 @@ struct Tray {
     endpoint: Endpoint,
     /// The daemon this process runs, if it runs one.
     hosted: Mutex<Option<Hosted>>,
+    /// `None` where starting at login isn't supported.
+    autostart: Option<Autostart>,
     /// Wakes the refresh loop right after a click.
     refresh: Notify,
+    /// Rebuild the menu even if nothing changed: a click ticks a checkbox by itself, even when
+    /// the action behind it fails.
+    redraw: AtomicBool,
 }
 
 struct Hosted {
@@ -84,11 +91,20 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> Result<()> {
     let profile = Profile::open(&cli.profile)?;
+    let autostart = if autostart::SUPPORTED {
+        Autostart::for_profile(profile.name())
+            .inspect_err(|e| tracing::warn!(error = %e, "can't start at login"))
+            .ok()
+    } else {
+        None
+    };
     let tray = Arc::new(Tray {
         endpoint: Endpoint::for_profile(&profile),
         profile,
         hosted: Mutex::new(None),
+        autostart,
         refresh: Notify::new(),
+        redraw: AtomicBool::new(false),
     });
 
     let for_setup = Arc::clone(&tray);
@@ -116,7 +132,10 @@ fn setup<R: Runtime>(app: &AppHandle<R>, tray: Arc<Tray>) -> Result<()> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(ICON)?)
         .tooltip(tooltip(&state))
-        .menu(&build_menu(app, &menu::entries(&state))?)
+        .menu(&build_menu(
+            app,
+            &menu::entries(&state, tray.start_at_login()),
+        )?)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {
             if let Some(command) = Command::from_id(event.id().as_ref()) {
@@ -134,6 +153,14 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
             app.exit(0);
             return;
         }
+        Command::ToggleStartAtLogin => {
+            if let Err(e) = tray.toggle_start_at_login() {
+                tracing::warn!(error = %format!("{e:#}"), "could not change starting at login");
+            }
+            tray.redraw.store(true, Ordering::Relaxed);
+            tray.refresh.notify_one();
+            return;
+        }
         Command::TogglePause => Request::Pause { paused: None },
         Command::CopyRecent(id) => Request::CopyRecent { id },
     };
@@ -142,6 +169,7 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
         if let Err(e) = ask(&tray.endpoint, &request).await {
             tracing::warn!(error = %e, "the daemon refused a menu command");
         }
+        tray.redraw.store(true, Ordering::Relaxed);
         tray.refresh.notify_one();
     });
 }
@@ -163,8 +191,9 @@ async fn refresh_loop<R: Runtime>(app: AppHandle<R>, tray: Arc<Tray>) {
             }
         }
 
-        let wanted = (menu::entries(&state), state.paused());
-        if shown.as_ref() != Some(&wanted) {
+        let wanted = (menu::entries(&state, tray.start_at_login()), state.paused());
+        let redraw = tray.redraw.swap(false, Ordering::Relaxed);
+        if redraw || shown.as_ref() != Some(&wanted) {
             if let Err(e) = show(&app, &state, &wanted.0) {
                 tracing::warn!(error = %e, "could not update the tray menu");
             }
@@ -224,6 +253,21 @@ async fn ask(endpoint: &Endpoint, request: &Request) -> Result<Response> {
 }
 
 impl Tray {
+    fn start_at_login(&self) -> Option<bool> {
+        self.autostart.as_ref().map(Autostart::is_enabled)
+    }
+
+    fn toggle_start_at_login(&self) -> Result<()> {
+        let Some(autostart) = &self.autostart else {
+            return Ok(());
+        };
+        if autostart.is_enabled() {
+            autostart.disable()
+        } else {
+            autostart.enable(&Launch::this_program(self.profile.name())?)
+        }
+    }
+
     fn is_hosting(&self) -> bool {
         self.hosted
             .lock()

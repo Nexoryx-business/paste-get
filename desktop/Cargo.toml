@@ -39,6 +39,8 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_DataExchange"] }
+# The Run key, for starting at login.
+windows-registry = "0.6"
 
 # Notifications: Windows toasts and macOS through notify-rust, the freedesktop D-Bus service
 # elsewhere (KDE Plasma, mako, dunst, swaync…).
