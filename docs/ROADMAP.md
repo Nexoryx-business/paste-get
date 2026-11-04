@@ -86,6 +86,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 
 ### M8 — Release 0.1
 - [ ] CI builds: Windows installer, AppImage, AUR `PKGBUILD`, signed APK
+  - [x] Windows installer (NSIS, per user) and AppImage, with `pasteget` inside: `release.yml`,
+    a draft release for each `v*` tag (`RELEASING.md`)
 - [ ] README demo GIF, `SECURITY.md` draft
 - [ ] Human review of crypto and protocol code
 

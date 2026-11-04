@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "publisher": "paste-get contributors",
+    "copyright": "GPL-3.0-or-later",
+    "license": "GPL-3.0-or-later",
+    "category": "Utility",
+    "shortDescription": "Copy on your phone, paste on your PC",
+    "longDescription": "paste-get syncs the clipboard between an Android phone and this computer, over the local network, end-to-end encrypted.",
+    "homepage": "https://github.com/Nexoryx-business/paste-get",
+    "externalBin": ["binaries/pasteget"],
+    "windows": {
+      "webviewInstallMode": { "type": "skip" },
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "paste-get"
+      }
+    }
+  }
+}

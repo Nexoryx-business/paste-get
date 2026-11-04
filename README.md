@@ -45,6 +45,7 @@ with a second, in-memory daemon standing in for the phone.
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones and step-by-step plan |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Wire protocol: transport, pairing, messages |
 | [`docs/TESTING.md`](docs/TESTING.md) | Testing on real machines |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | How packages are built and released |
 | [`docs/devices/xiaomi-hyperos.md`](docs/devices/xiaomi-hyperos.md) | Phone setup for Xiaomi / POCO / Redmi (HyperOS) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to build, test and contribute |
 | [`CLAUDE.md`](CLAUDE.md) | Rules for AI-assisted development in this repo |
@@ -60,6 +61,7 @@ paste-get/
 ├─ ffi/             The phone API, exported to Kotlin with UniFFI
 ├─ uniffi-bindgen/  Generates the Kotlin bindings
 ├─ android/         Kotlin + Jetpack Compose app
+├─ packaging/       Package builds (Windows installer, AppImage)
 ├─ fuzz/            Fuzz targets for every parser of untrusted input
 └─ docs/
 ```

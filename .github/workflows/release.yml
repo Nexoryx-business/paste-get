@@ -1,0 +1,95 @@
+name: Release
+
+# Builds the packages people install. A `v*` tag (see docs/RELEASING.md) also puts them in a
+# draft GitHub release, published by hand after a last look. Changes to the packaging run the
+# builds without releasing, so they're tested before a tag needs them.
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    # Not evaluated for tags: every tag builds.
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "desktop/tray/tauri*.json"
+      - "android/app/build.gradle.kts"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: "2.12.4"
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "=$env:TAURI_CLI_VERSION" --locked
+      - name: Build the installer
+        shell: bash
+        run: packaging/build-desktop.sh nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  linux:
+    name: AppImage
+    # The oldest supported Ubuntu: an AppImage runs on systems at least as new as the one it
+    # was built on.
+    runs-on: ubuntu-22.04
+    env:
+      # linuxdeploy is itself an AppImage; runners have no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install the libraries the tray links to
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+      - name: Build the AppImage
+        run: packaging/build-desktop.sh appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Draft the GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * | tee SHA256SUMS
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft --prerelease \
+            --title "paste-get ${GITHUB_REF_NAME#v}" \
+            --generate-notes
