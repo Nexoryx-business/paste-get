@@ -69,6 +69,35 @@ jobs:
           path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+  aur:
+    name: AUR package (makepkg on Arch)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install the build tools
+        run: pacman -Syu --noconfirm --needed base-devel git
+      - uses: actions/checkout@v4
+        with:
+          # makepkg clones the repository; it needs the history for pkgver.
+          fetch-depth: 0
+      - name: Build this commit with the PKGBUILD
+        run: |
+          useradd -m builder
+          # The checkout belongs to root; makepkg clones it as builder.
+          su builder -c "git config --global --add safe.directory '*'"
+          cp packaging/aur/paste-get-git/PKGBUILD /home/builder/
+          # The same PKGBUILD, built from this checkout instead of the default branch.
+          sed -i "s|^source=.*|source=(\"git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA\")|" \
+            /home/builder/PKGBUILD
+          chown -R builder /home/builder
+          echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+          su builder -c 'cd ~ && makepkg --syncdeps --noconfirm'
+      - name: The committed .SRCINFO matches the PKGBUILD
+        run: |
+          cd packaging/aur/paste-get-git
+          chown -R builder .
+          su builder -c 'makepkg --printsrcinfo' | diff -u .SRCINFO -
+
   release:
     name: Draft the GitHub release
     if: startsWith(github.ref, 'refs/tags/v')

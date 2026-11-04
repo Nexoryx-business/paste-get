@@ -9,8 +9,9 @@ How the packages are built, and the steps of a release. CI does the building
 |---|---|---|
 | Windows installer, `paste-get_<version>_x64-setup.exe` | `packaging/build-desktop.sh nsis` on `windows-latest` | Installs for the current user (no admin prompt) in `%LOCALAPPDATA%\paste-get`, with a Start menu entry and an uninstaller. `pasteget.exe` is installed next to `pasteget-tray.exe` |
 | Linux AppImage, `paste-get_<version>_amd64.AppImage` | `packaging/build-desktop.sh appimage` on Ubuntu 22.04 | One file; runs on distributions at least as new as Ubuntu 22.04. Contains `pasteget` too, but only the tray is started from outside |
+| Arch package `paste-get-git` | `packaging/aur/paste-get-git/PKGBUILD`, tested with `makepkg` in an Arch container | `/usr/bin/pasteget` and `pasteget-tray`, a desktop entry and an icon. Built from source on the user's machine |
 
-Every push that changes the packaging builds both, without releasing: they're in the run's
+Every push that changes the packaging builds all three, without releasing: they're in the run's
 artifacts. A `v*` tag builds them and puts them, with a `SHA256SUMS` file, in a **draft**
 GitHub release.
 
@@ -27,6 +28,25 @@ The script builds `pasteget`, copies it to `desktop/tray/binaries/` under the ta
 Tauri expects for a "sidecar" program), then bundles the tray with
 `desktop/tray/tauri.bundle.conf.json` on top of `tauri.conf.json`. That file is kept apart
 because declaring the sidecar makes `cargo build` look for it, and everyday builds don't have it.
+
+## The AUR package
+
+`paste-get-git` builds the latest commit of the default branch, so it needs no update per
+release. The CI job builds it from the commit being tested and checks that `.SRCINFO` matches the
+PKGBUILD. After changing the PKGBUILD, regenerate it on Arch:
+`makepkg --printsrcinfo > .SRCINFO`.
+
+Publishing it on the AUR is done once, by hand, by whoever maintains it there (it needs an AUR
+account with an SSH key):
+```sh
+git clone ssh://aur@aur.archlinux.org/paste-get-git.git
+cp packaging/aur/paste-get-git/{PKGBUILD,.SRCINFO} paste-get-git/
+cd paste-get-git && git add PKGBUILD .SRCINFO && git commit -m "Initial upload" && git push
+```
+Until then, Arch users can build it from the repository:
+`cd packaging/aur/paste-get-git && makepkg -si`.
+
+A `paste-get` package built from release tarballs can follow once releases are regular.
 
 ## Not signed yet
 

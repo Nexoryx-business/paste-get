@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=paste-get
+GenericName=Clipboard sync
+Comment=Copy on your phone, paste on your PC
+Exec=pasteget-tray
+Icon=io.github.nexoryx.pasteget
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;phone;android;sync;screenshot;
+StartupNotify=false

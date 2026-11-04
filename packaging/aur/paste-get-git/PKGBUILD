@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds paste-get from the latest commit of the default branch. See docs/RELEASING.md.
+# Maintainer: paste-get contributors <https://github.com/Nexoryx-business/paste-get>
+
+pkgname=paste-get-git
+_repo=paste-get
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc='Copy on your phone, paste on your PC: clipboard sync with Android over the local network'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Nexoryx-business/paste-get'
+license=('GPL-3.0-or-later')
+# The tray app (Tauri 2) links to WebKitGTK and the app indicator library.
+depends=('gcc-libs' 'glibc' 'gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator' 'hicolor-icon-theme')
+makedepends=('git' 'cargo')
+provides=('paste-get')
+conflicts=('paste-get')
+options=('!lto')
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_repo"
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "$_repo"
+  # Arch's Rust instead of the version rust-toolchain.toml pins for development.
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+  cd "$_repo"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p pasteget-desktop -p pasteget-tray
+}
+
+check() {
+  cd "$_repo"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # The protocol core. The desktop tests need a network and a session bus.
+  cargo test --frozen --release -p pasteget-core
+}
+
+package() {
+  cd "$_repo"
+  install -Dm755 target/release/pasteget target/release/pasteget-tray -t "$pkgdir/usr/bin/"
+  install -Dm644 packaging/linux/io.github.nexoryx.pasteget.desktop \
+    -t "$pkgdir/usr/share/applications/"
+  install -Dm644 desktop/tray/icons/icon.png \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/io.github.nexoryx.pasteget.png"
+  install -Dm644 README.md docs/TESTING.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}

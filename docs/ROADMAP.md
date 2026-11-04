@@ -88,6 +88,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [ ] CI builds: Windows installer, AppImage, AUR `PKGBUILD`, signed APK
   - [x] Windows installer (NSIS, per user) and AppImage, with `pasteget` inside: `release.yml`,
     a draft release for each `v*` tag (`RELEASING.md`)
+  - [x] AUR `paste-get-git` PKGBUILD, built with `makepkg` in an Arch container by CI (publishing
+    it on the AUR needs a maintainer account)
 - [ ] README demo GIF, `SECURITY.md` draft
 - [ ] Human review of crypto and protocol code
 

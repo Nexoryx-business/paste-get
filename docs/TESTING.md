@@ -43,6 +43,11 @@ git checkout ccr-8ee1704b-80slpz   # until this branch is merged
 cargo build --release
 alias pasteget="$PWD/target/release/pasteget"
 ```
+Or install it as a package, which also puts the tray in the application menu:
+```sh
+cd packaging/aur/paste-get-git && makepkg -si
+```
+(it builds the default branch, so until this branch is merged, use the `cargo build` above).
 The daemon needs no other library: Wayland and X11 are spoken directly. The two extra packages
 are for the tray app (section 9). Without them, build only the daemon and the command:
 `cargo build --release -p pasteget-desktop`.
