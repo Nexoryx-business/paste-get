@@ -60,6 +60,13 @@
     <string name="fallback_ready">Ready for when Shizuku stops: log access and overlay allowed</string>
     <string name="fallback_needs_overlay">For when Shizuku stops, allow paste-get to display over other apps.</string>
     <string name="fallback_allow_overlay">Allow display over other apps</string>
+    <string name="logs_waiting">Meanwhile, paste-get reads copies another way, once you open it after a restart of the phone.</string>
+    <string name="logs_starting">Meanwhile, paste-get reads copies another way. If Android asks, allow paste-get to access the device logs.</string>
+    <string name="logs_running">Meanwhile, copies are read another way: a window appears for a moment, which may close the keyboard.</string>
+    <string name="logs_retry">Ask again</string>
+    <string name="copies_channel">Sending copies</string>
+    <string name="copies_paused_title">Copies are not sent</string>
+    <string name="copies_paused_text">Open paste-get to send what you copy again</string>
     <plurals name="last_copy">
         <item quantity="one">Last copy (%1$s) sent at %2$s to %3$d computer</item>
         <item quantity="other">Last copy (%1$s) sent at %2$s to %3$d computers</item>

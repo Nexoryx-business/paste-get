@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
                 val connected by pasteGet.connected.collectAsStateWithLifecycle()
                 val lastDelivery by pasteGet.lastDelivery.collectAsStateWithLifecycle()
                 val shizuku by pasteGet.autoCopy.shizuku.state.collectAsStateWithLifecycle()
+                val logs by pasteGet.autoCopy.logs.state.collectAsStateWithLifecycle()
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
                 HomeScreen(
                     deviceId = pasteGet.client.deviceId(),
@@ -110,7 +111,7 @@ class MainActivity : ComponentActivity() {
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
                     onOpenSettings = ::openAppSettings,
-                    autoCopy = AutoCopyCardState(copiesOn, shizuku, fallback, lastCopy),
+                    autoCopy = AutoCopyCardState(copiesOn, shizuku, logs, fallback, lastCopy),
                     autoCopyActions = AutoCopyActions(
                         onChange = ::setSendCopies,
                         onAllowShizuku = pasteGet.autoCopy.shizuku::requestPermission,
@@ -118,6 +119,7 @@ class MainActivity : ComponentActivity() {
                         onGetShizuku = ::getShizuku,
                         onGrantFallback = ::grantFallback,
                         onAllowOverlay = ::openOverlaySettings,
+                        onRetryLogs = pasteGet.autoCopy.logs::retry,
                     ),
                 )
             }
@@ -132,6 +134,13 @@ class MainActivity : ComponentActivity() {
         refreshScreenshots()
         copiesOn = Preferences.sendCopies(this)
         fallback = FallbackAccess.of(this)
+        // Android 13+ asks for log access only while the app is in front (mode B).
+        pasteGet.autoCopy.setInFront(true)
+    }
+
+    override fun onPause() {
+        pasteGet.autoCopy.setInFront(false)
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -416,6 +425,7 @@ private fun LastDeliveryText(delivery: LastDelivery) {
 private data class AutoCopyCardState(
     val on: Boolean,
     val shizuku: ShizukuState,
+    val logs: LogStatus,
     val fallback: FallbackAccess,
     val lastCopy: LastCopy?,
 )
@@ -427,6 +437,7 @@ private class AutoCopyActions(
     val onGetShizuku: () -> Unit,
     val onGrantFallback: () -> Unit,
     val onAllowOverlay: () -> Unit,
+    val onRetryLogs: () -> Unit,
 )
 
 /** The automatic copy: on or off, how it works right now, and what to do if it doesn't. */
@@ -441,7 +452,7 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
                         stringResource(
                             when {
                                 !state.on -> R.string.copies_off
-                                state.shizuku.status == ShizukuStatus.WATCHING -> R.string.copies_on
+                                CopyMode.of(state.shizuku, state.logs) != CopyMode.MANUAL -> R.string.copies_on
                                 else -> R.string.copies_waiting
                             },
                         ),
@@ -453,6 +464,7 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
             if (state.on) {
                 ShizukuLine(state.shizuku, actions)
                 FallbackLine(state.shizuku, state.fallback, actions)
+                LogLine(state.logs, actions)
                 state.lastCopy?.let { LastCopyText(it) }
             }
         }
@@ -495,6 +507,21 @@ private fun FallbackLine(shizuku: ShizukuState, fallback: FallbackAccess, action
             TextButton(onClick = actions.onAllowOverlay) { Text(stringResource(R.string.fallback_allow_overlay)) }
         }
         else -> {}
+    }
+}
+
+/** Mode B, while Shizuku isn't watching. */
+@Composable
+private fun LogLine(logs: LogStatus, actions: AutoCopyActions) {
+    val text = when (logs) {
+        LogStatus.OFF, LogStatus.NEEDS_PERMISSIONS -> return
+        LogStatus.WAITING_FOR_APP -> R.string.logs_waiting
+        LogStatus.STARTING -> R.string.logs_starting
+        LogStatus.RUNNING -> R.string.logs_running
+    }
+    Text(stringResource(text), style = MaterialTheme.typography.bodySmall)
+    if (logs == LogStatus.STARTING) {
+        TextButton(onClick = actions.onRetryLogs) { Text(stringResource(R.string.logs_retry)) }
     }
 }
 
