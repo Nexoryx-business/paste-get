@@ -98,6 +98,18 @@
             tools:ignore="DiscouragedApi"
             tools:replace="android:screenOrientation" />
 
+        <!-- Serves clips from the PC that are too big to copy as they are (images, long texts)
+             to the app that pastes them. The clipboard grants it access to each link. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.clips"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/clip_files" />
+        </provider>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="false">

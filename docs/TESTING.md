@@ -2,7 +2,7 @@
 
 Automated tests use in-memory clipboards. Only real machines can show whether the **system
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
-section 6 automatic screenshots.
+section 6 automatic screenshots, section 7 the way back, from the PC to the phone.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -168,6 +168,21 @@ Report the five values per OS, and whether S1 felt instant.
 Notifications are set in `settings.toml`, in `%APPDATA%\paste-get\default\` on Windows and
 `~/.config/paste-get/default/` on Linux: `notify = "images"` (the default), `"all"` (text too) or
 `"off"`. Restart the daemon after a change.
+
+## 7. From the PC to the phone (M6)
+
+Whatever you copy on the PC lands on the phone's clipboard, ready to paste, with nothing to tap
+on the phone. Update both sides first, as in section 6.
+
+| # | Do this | Expected |
+|---|---|---|
+| C1 | PC: copy some text. Phone: long-press a text field → **Paste** | The text is pasted |
+| C2 | PC: open a text file over 1 MB (a log, for example), select all, copy. Phone: paste it in a notes app | The whole text is pasted, and the paste-get notification is still there |
+| C3 | Lock the phone for 5 minutes, unlock it, repeat C1 | Still works, without opening the app |
+
+`adb logcat -s paste-get` shows "clip received: text/plain…, … bytes" for each clip, and for C2
+"clip saved as clip-….txt for the clipboard": texts over 256 KB go on the clipboard as a link to
+a file, since Android can't pass that much in one go.
 
 ## Known limitations
 

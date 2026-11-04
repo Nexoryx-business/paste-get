@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- What the FileProvider may serve: the clip files of ClipFiles, nothing else. -->
+<paths>
+    <cache-path name="clips" path="clips/" />
+</paths>

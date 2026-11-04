@@ -62,7 +62,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - **Done when:** copy on the phone → paste on the PC, no tap, even after the POCO reboots (mode B).
 
 ### M6 — PC → phone
-- [ ] Text into the Android clipboard
+- [x] Text into the Android clipboard. Long texts go as a link to a file, like images: clips pass
+  through Binder, whose buffer is 1 MB
 - [ ] Images through `FileProvider`
 - **Done when:** a PC screenshot pastes into a phone app.
 
