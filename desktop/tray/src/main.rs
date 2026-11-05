@@ -12,6 +12,7 @@
 
 mod menu;
 mod pairing;
+mod settings;
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,6 +42,9 @@ const REFRESH_EVERY: Duration = Duration::from_secs(2);
 const RESTART_EVERY: Duration = Duration::from_secs(15);
 /// How long a control request may take before the daemon counts as stuck.
 const ASK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Restarting the hosted daemon: tries, and the pause before each.
+const RESTART_ATTEMPTS: usize = 10;
+const RESTART_PAUSE: Duration = Duration::from_millis(300);
 
 const TRAY_ID: &str = "paste-get";
 const ICON: &[u8] = include_bytes!("../icons/tray.png");
@@ -69,6 +73,8 @@ struct Tray {
     redraw: AtomicBool,
     /// The pairing window's task. A new one replaces it.
     pairing: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// Held while the hosted daemon starts or restarts, so only one runs.
+    starting: tokio::sync::Mutex<()>,
 }
 
 struct Hosted {
@@ -109,10 +115,17 @@ fn run(cli: &Cli) -> Result<()> {
         refresh: Notify::new(),
         redraw: AtomicBool::new(false),
         pairing: Mutex::new(None),
+        starting: tokio::sync::Mutex::new(()),
     });
 
     let for_setup = Arc::clone(&tray);
     let app = tauri::Builder::default()
+        .manage(Arc::clone(&tray))
+        .invoke_handler(tauri::generate_handler![
+            load_settings,
+            save_settings,
+            close_window
+        ])
         .setup(move |app| {
             // A tray app: no Dock icon on macOS.
             #[cfg(target_os = "macos")]
@@ -163,6 +176,12 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
         }
         Command::Pair => {
             open_pairing(app, tray);
+            return;
+        }
+        Command::Settings => {
+            if let Err(e) = settings::open(app) {
+                tracing::warn!(error = %format!("{e:#}"), "could not open the settings");
+            }
             return;
         }
         Command::ToggleStartAtLogin => {
@@ -225,7 +244,14 @@ async fn refresh_loop<R: Runtime>(app: AppHandle<R>, tray: Arc<Tray>) {
     loop {
         let mut state = fetch(&tray.endpoint).await;
         if matches!(state, State::Down(_)) && !tray.is_hosting() && Instant::now() >= next_start {
-            match tray.start_hosted().await {
+            let _starting = tray.starting.lock().await;
+            let started = if tray.is_hosting() {
+                // Restarted by the settings meanwhile.
+                Ok(())
+            } else {
+                tray.start_hosted().await
+            };
+            match started {
                 Ok(()) => state = fetch(&tray.endpoint).await,
                 Err(e) => {
                     tracing::warn!(error = %format!("{e:#}"), "could not start the daemon");
@@ -343,6 +369,25 @@ impl Tray {
         Ok(())
     }
 
+    /// Stops the daemon this tray runs and starts it again, for settings read only at start.
+    /// Phones reconnect by themselves within seconds.
+    async fn restart_hosted(&self) -> Result<()> {
+        let _starting = self.starting.lock().await;
+        self.stop_hosted();
+        // The old listener and control channel close as their tasks wind down.
+        let mut last_error = None;
+        for _ in 0..RESTART_ATTEMPTS {
+            tokio::time::sleep(RESTART_PAUSE).await;
+            match self.start_hosted().await {
+                Ok(()) => return Ok(()),
+                Err(e) => last_error = Some(e),
+            }
+        }
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("the daemon did not start"))
+            .context("paste-get could not restart"))
+    }
+
     fn stop_hosted(&self) {
         let hosted = self
             .hosted
@@ -355,6 +400,52 @@ impl Tray {
             tracing::info!("daemon stopped");
         }
     }
+}
+
+/// A window's own Close button. (A page can't close its window by itself.)
+#[tauri::command]
+fn close_window(window: tauri::WebviewWindow) {
+    let _ = window.close();
+}
+
+/// The settings window asks for the current values.
+#[tauri::command]
+fn load_settings(tray: tauri::State<'_, Arc<Tray>>) -> Result<settings::Form, String> {
+    let current = tray.profile.settings().map_err(|e| format!("{e:#}"))?;
+    Ok(settings::Form::of(&current, tray.start_at_login()))
+}
+
+/// The settings window saves: write `settings.toml`, apply what can change at once, and restart
+/// the daemon this tray runs if the name or hotkeys changed. Returns what to tell the user.
+#[tauri::command]
+async fn save_settings(
+    tray: tauri::State<'_, Arc<Tray>>,
+    form: settings::Form,
+) -> Result<String, String> {
+    let tray = Arc::clone(&tray);
+    let text = |e: anyhow::Error| format!("{e:#}");
+    let current = tray.profile.settings().map_err(text)?;
+    let new = form.apply(&current)?;
+    tray.profile.save_settings(&new).map_err(text)?;
+    if let Some(wanted) = form.start_at_login
+        && tray.start_at_login().is_some_and(|now| now != wanted)
+    {
+        tray.toggle_start_at_login().map_err(text)?;
+    }
+    // A daemon that isn't running reads the file when it starts.
+    let restart_needed = matches!(
+        ask(&tray.endpoint, &Request::ReloadSettings).await,
+        Ok(Response::SettingsReloaded {
+            restart_needed: true
+        })
+    );
+    let hosting = tray.is_hosting();
+    if restart_needed && hosting {
+        tray.restart_hosted().await.map_err(text)?;
+    }
+    tray.redraw.store(true, Ordering::Relaxed);
+    tray.refresh.notify_one();
+    Ok(settings::saved_message(restart_needed, hosting).into())
 }
 
 fn build_menu<R: Runtime>(app: &AppHandle<R>, entries: &[Entry]) -> tauri::Result<Menu<R>> {

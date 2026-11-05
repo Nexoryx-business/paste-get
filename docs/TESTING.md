@@ -187,7 +187,8 @@ Report the five values per OS, and whether S1 felt instant.
 Notifications are set in `settings.toml`, in `%APPDATA%\paste-get\default\` on Windows and
 `~/.config/paste-get/default/` on Linux: `notify = "images"` (the default), `"all"` (text too) or
 `"off"`. `offer_to_open_links = false` turns off the notification for links (section 13).
-Restart the daemon after a change.
+The tray's *Settings…* window edits these, the name and the hotkeys, and applies them; after
+editing the file by hand, restart the daemon.
 
 ## 7. From the PC to the phone (M6)
 
@@ -297,6 +298,10 @@ see its log). Keep the fake phone of section 2 running.
 | T10 | With a new profile (`pasteget-tray --profile fresh`), start the tray | The *Pair a phone* window opens by itself with a QR code |
 | T11 | Phone: **Pair a computer**, scan that code | The window shows ✓ "Paired with <phone>" and closes after a few seconds; the tray keeps running and lists the phone as ● |
 | T12 | Menu → *Pair a phone…*, then close the window with its × | The tray keeps running (closing the window doesn't quit) |
+| T15 | Menu → *Settings…*, change the notifications to "Images and text", **Save** | "Saved."; text from the phone now shows a notification, without a restart |
+| T16 | In *Settings…*, rename this computer, **Save** | "Saved. paste-get restarted…"; within seconds the phone reconnects and shows the new name |
+| T17 | In *Settings…*, click a hotkey field, press Ctrl+Alt+K, **Save**, then press Ctrl+Alt+K | It does that action (KDE may ask to allow the shortcut again). Backspace in the field turns the hotkey off |
+| T18 | In *Settings…*, give both hotkeys the same keys, **Save** | An error says so; nothing is saved |
 | T14 | Windows: get a notification (an image from the phone, or a hotkey's) | It says it comes from **paste-get**, with its icon, not "Windows PowerShell". After uninstalling, paste-get is gone from Settings → System → Notifications |
 | T13 | Last: menu → the phone → *Forget this device* | The phone disappears from the menu within 2 s and can't reconnect. Within a few seconds the real phone shows "<PC> unpaired this phone" and drops the computer from its list. Pair again to go on |
 

@@ -7,6 +7,7 @@ use pasteget_desktop::control::{DeviceStatusReply, RecentReply, StatusReply};
 use pasteget_desktop::recent;
 
 pub const PAIR: &str = "pair";
+pub const SETTINGS: &str = "settings";
 pub const PAUSE: &str = "pause";
 pub const START_AT_LOGIN: &str = "start-at-login";
 pub const QUIT: &str = "quit";
@@ -76,6 +77,7 @@ pub enum Entry {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Pair,
+    Settings,
     TogglePause,
     ToggleStartAtLogin,
     CopyRecent(u64),
@@ -88,6 +90,7 @@ impl Command {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             PAIR => Some(Self::Pair),
+            SETTINGS => Some(Self::Settings),
             PAUSE => Some(Self::TogglePause),
             START_AT_LOGIN => Some(Self::ToggleStartAtLogin),
             QUIT => Some(Self::Quit),
@@ -107,6 +110,10 @@ impl Command {
 pub fn entries(state: &State, start_at_login: Option<bool>) -> Vec<Entry> {
     let mut entries = daemon_entries(state);
     entries.push(Entry::Separator);
+    entries.push(Entry::Action {
+        id: SETTINGS.into(),
+        label: "Settings…".into(),
+    });
     if let Some(checked) = start_at_login {
         entries.push(Entry::Check {
             id: START_AT_LOGIN.into(),
@@ -282,6 +289,7 @@ mod tests {
                 "Recent > Text: hello world · POCO M8 5G, 2 min | Image (JPEG, 1.2 MB) · this computer, 2 min",
                 "[ ] Pause syncing",
                 "---",
+                "Settings…",
                 "[x] Start at login",
                 "Quit",
             ]
@@ -333,6 +341,7 @@ mod tests {
         assert_eq!(Command::from_id(PAUSE), Some(Command::TogglePause));
         assert_eq!(Command::from_id(QUIT), Some(Command::Quit));
         assert_eq!(Command::from_id(PAIR), Some(Command::Pair));
+        assert_eq!(Command::from_id(SETTINGS), Some(Command::Settings));
         assert_eq!(
             Command::from_id(START_AT_LOGIN),
             Some(Command::ToggleStartAtLogin)

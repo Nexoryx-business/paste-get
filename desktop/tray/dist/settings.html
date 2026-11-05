@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · paste-get</title>
+  <link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body>
+  <form id="settings" novalidate>
+    <h1>Settings</h1>
+
+    <section>
+      <label for="device_name">This computer's name</label>
+      <input id="device_name" name="device_name" maxlength="64" autocomplete="off" required>
+      <p class="hint">Shown on your phone and on your other computers.</p>
+    </section>
+
+    <section>
+      <h2>Notifications</h2>
+      <fieldset>
+        <legend>Show one when something arrives:</legend>
+        <label class="choice"><input type="radio" name="notify" value="images"> Images only</label>
+        <label class="choice"><input type="radio" name="notify" value="all"> Images and text</label>
+        <label class="choice"><input type="radio" name="notify" value="off"> Never</label>
+      </fieldset>
+      <label class="choice"><input type="checkbox" id="offer_to_open_links"> Offer to open links copied on another device</label>
+      <p class="hint">2FA codes always say they arrived, unless notifications are off. Never with the code itself.</p>
+    </section>
+
+    <section>
+      <h2>Hotkeys</h2>
+      <label for="toggle_pause">Pause or resume syncing</label>
+      <input id="toggle_pause" class="hotkey" placeholder="None" autocomplete="off" spellcheck="false">
+      <label for="send_clipboard">Send the clipboard now</label>
+      <input id="send_clipboard" class="hotkey" placeholder="None" autocomplete="off" spellcheck="false">
+      <p class="hint">Click a field and press the keys, such as Ctrl+Alt+Shift+P. Backspace turns it off.</p>
+    </section>
+
+    <section id="login_section" hidden>
+      <label class="choice"><input type="checkbox" id="start_at_login"> Start paste-get when I log in</label>
+    </section>
+
+    <p id="status" class="status" role="status"></p>
+
+    <div class="buttons">
+      <button type="button" id="close">Close</button>
+      <button type="submit" id="save" class="primary">Save</button>
+    </div>
+  </form>
+</body>
+</html>

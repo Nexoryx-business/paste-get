@@ -59,22 +59,41 @@ pub enum Request {
     Forget {
         device: String,
     },
+    /// Reads `settings.toml` again, after it was edited.
+    ReloadSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
     Status(StatusReply),
-    Invite { uri: String, expires_in_secs: u64 },
-    PairingAttemptFailed { reason: String },
+    Invite {
+        uri: String,
+        expires_in_secs: u64,
+    },
+    PairingAttemptFailed {
+        reason: String,
+    },
     Paired(DeviceReply),
     Joined(DeviceReply),
-    Sent { devices: usize },
-    Paused { paused: bool },
-    Recent { clips: Vec<RecentReply> },
+    Sent {
+        devices: usize,
+    },
+    Paused {
+        paused: bool,
+    },
+    Recent {
+        clips: Vec<RecentReply>,
+    },
     Copied,
     Forgotten(DeviceReply),
-    Error { message: String },
+    /// Notifications and links changed at once; the name, port and hotkeys need a restart.
+    SettingsReloaded {
+        restart_needed: bool,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -393,6 +412,12 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
                 daemon.copy_recent(id)?;
                 write_half
                     .write_all(line_of(Response::Copied).as_bytes())
+                    .await?;
+            }
+            Request::ReloadSettings => {
+                let restart_needed = daemon.reload_settings()?;
+                write_half
+                    .write_all(line_of(Response::SettingsReloaded { restart_needed }).as_bytes())
                     .await?;
             }
             Request::Forget { device } => {

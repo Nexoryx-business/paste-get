@@ -3,8 +3,8 @@
 //! The "Pair a phone" window: shows the pairing QR code, then says which phone paired.
 //!
 //! It asks the daemon for a code through the control channel, like `pasteget pair`, and shows
-//! what comes back in a small page (`dist/pair.html`). The page has no access to Tauri's API:
-//! this side drives it with [`script`], one call to `window.pasteget.show` per change.
+//! what comes back in a small page (`dist/pair.html`). The page calls nothing itself: this side
+//! drives it with [`script`], one call to `window.pasteget.show` per change.
 
 use std::time::Duration;
 

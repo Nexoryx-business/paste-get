@@ -1,0 +1,75 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f7;
+  --panel: #ffffff;
+  --fg: #1c2324;
+  --muted: #5b6769;
+  --line: #d5dcdd;
+  --ok: #0b7a52;
+  --bad: #b3261e;
+  --accent: #0f8b8d;
+  --on-accent: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161b1c;
+    --panel: #1f2627;
+    --fg: #e8eded;
+    --muted: #a3afb1;
+    --line: #364042;
+    --ok: #5fd3a0;
+    --bad: #ff8a80;
+    --accent: #4fc3c5;
+    --on-accent: #0b1a1a;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.45 system-ui, "Segoe UI", "Noto Sans", sans-serif;
+  cursor: default;
+}
+form { padding: 20px 24px 24px; max-width: 520px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 16px; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 0 0 12px;
+}
+section > label:not(.choice) { display: block; font-weight: 600; margin: 8px 0 4px; }
+section > label:first-child { margin-top: 0; }
+input:not([type]), input.hotkey {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input.hotkey { font-family: ui-monospace, "Cascadia Mono", "DejaVu Sans Mono", monospace; caret-color: transparent; }
+fieldset { border: 0; margin: 0 0 6px; padding: 0; }
+legend { color: var(--muted); padding: 0; margin-bottom: 4px; }
+.choice { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.choice input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+.status { min-height: 1.5em; margin: 4px 2px 12px; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--bad); }
+.buttons { display: flex; justify-content: flex-end; gap: 8px; }
+button {
+  font: inherit;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button:disabled { opacity: 0.6; }

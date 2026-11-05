@@ -22,6 +22,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{PairedDevice, sanitize_device_name};
+
+/// Longest device name, in characters: names from other devices are cut there too.
+pub use pasteget_core::pairing::MAX_DEVICE_NAME_CHARS;
 use serde::{Deserialize, Serialize};
 
 use crate::hotkeys::HotkeySettings;
@@ -110,6 +113,19 @@ impl Profile {
             }
             Err(e) => Err(e).with_context(|| format!("could not read {}", path.display())),
         }
+    }
+
+    /// Replaces `settings.toml` (a hand-written file loses its comments). The device name is
+    /// cleaned up as when it is read.
+    pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        let settings = Settings {
+            device_name: sanitize_device_name(&settings.device_name),
+            ..settings.clone()
+        };
+        write_private_file(
+            &self.dir.join(SETTINGS_FILE),
+            toml::to_string(&settings)?.as_bytes(),
+        )
     }
 
     pub fn known_devices(&self) -> Result<KnownDevices> {

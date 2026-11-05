@@ -3093,6 +3093,7 @@ dependencies = [
  "clap",
  "pasteget-desktop",
  "qrcode",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

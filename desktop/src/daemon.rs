@@ -32,7 +32,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{sleep, timeout};
 
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
-use crate::config::{KnownDevice, KnownDevices, NotifyFor, Profile};
+use crate::config::{KnownDevice, KnownDevices, NotifyFor, Profile, Settings};
 use crate::discovery::Advertiser;
 use crate::hotkeys::{self, Action, Hotkeys};
 use crate::notify::{Notifier, Received};
@@ -115,8 +115,11 @@ struct Shared {
     guard: Mutex<EchoGuard>,
     clipboard: ClipboardWatcher,
     notifier: Option<Arc<dyn Notifier>>,
-    notify_for: NotifyFor,
-    offer_to_open_links: bool,
+    /// Changed by [`Daemon::reload_settings`].
+    notify_for: Mutex<NotifyFor>,
+    offer_to_open_links: AtomicBool,
+    /// What the daemon started with, which only a restart changes: its name, port and hotkeys.
+    started_with: Settings,
     paused: AtomicBool,
     recent: Mutex<RecentClips>,
     events: broadcast::Sender<Event>,
@@ -147,7 +150,7 @@ impl Daemon {
         let shared = Arc::new(Shared {
             guard: Mutex::new(EchoGuard::new(identity.device_id())),
             identity,
-            device_name: settings.device_name,
+            device_name: settings.device_name.clone(),
             profile,
             listen_port: local_addr.port(),
             advertised_ips: options.advertised_ips,
@@ -156,8 +159,9 @@ impl Daemon {
             peers: Peers::new(),
             clipboard,
             notifier: options.notifier,
-            notify_for: settings.notify,
-            offer_to_open_links: settings.offer_to_open_links,
+            notify_for: Mutex::new(settings.notify),
+            offer_to_open_links: AtomicBool::new(settings.offer_to_open_links),
+            started_with: settings.clone(),
             paused: AtomicBool::new(false),
             recent: Mutex::new(RecentClips::default()),
             events,
@@ -342,6 +346,22 @@ impl Daemon {
             sensitive: false,
         };
         self.shared.clipboard.write(content, |_| {})
+    }
+
+    /// Reads `settings.toml` again and applies what can change while running: notifications
+    /// and links. Returns whether the rest (name, port, hotkeys) changed, which takes a restart.
+    pub fn reload_settings(&self) -> Result<bool> {
+        let settings = self.shared.profile.settings()?;
+        *lock(&self.shared.notify_for) = settings.notify;
+        self.shared
+            .offer_to_open_links
+            .store(settings.offer_to_open_links, Ordering::Relaxed);
+        let started = &self.shared.started_with;
+        let restart_needed = settings.device_name != started.device_name
+            || settings.port != started.port
+            || settings.hotkeys != started.hotkeys;
+        tracing::info!(restart_needed, "settings reloaded");
+        Ok(restart_needed)
     }
 
     pub async fn status(&self) -> Status {
@@ -559,19 +579,18 @@ impl SessionEvents for Shared {
                 Kind::Copy => None,
             },
         };
+        let notify_for = *lock(&self.notify_for);
         // A link gets a notification of its own, which opens it when clicked.
-        let link = clip
-            .as_text()
-            .filter(|_| {
-                self.offer_to_open_links && self.notify_for != NotifyFor::Off && !clip.sensitive
-            })
-            .and_then(detect::link);
+        let offer_link = self.offer_to_open_links.load(Ordering::Relaxed)
+            && notify_for != NotifyFor::Off
+            && !clip.sensitive;
+        let link = clip.as_text().filter(|_| offer_link).and_then(detect::link);
         // Sensitive clips stay as quiet as possible: a one-time code only says where it's from.
         let quiet = clip.sensitive && received.code_from.is_none();
         let notifier = self
             .notifier
             .clone()
-            .filter(|_| !quiet && (link.is_some() || received.wanted_by(self.notify_for)));
+            .filter(|_| !quiet && (link.is_some() || received.wanted_by(notify_for)));
         let (mime_type, len) = (clip.mime_type.clone(), clip.data.len());
         let applied = move |took: Duration| {
             tracing::info!(%mime_type, len, ms = took.as_millis(), "clip applied to the clipboard");
@@ -983,6 +1002,35 @@ mod tests {
                 == Some(Raw::Text("sent with pasteget send".into())))
             .await
         );
+    }
+
+    #[tokio::test]
+    async fn edited_settings_apply_at_once_or_ask_for_a_restart() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+
+        // Links offered by default; turned off without a restart.
+        let profile = &pc.daemon.shared.profile;
+        let mut settings = profile.settings().unwrap();
+        settings.offer_to_open_links = false;
+        settings.notify = NotifyFor::All;
+        profile.save_settings(&settings).unwrap();
+        assert!(!pc.daemon.reload_settings().unwrap());
+
+        laptop
+            .clipboard
+            .set(Raw::Text("https://example.com".into()));
+        assert!(wait_for(|| !pc.notifications.0.lock().unwrap().is_empty()).await);
+        assert!(pc.notifications.2.lock().unwrap().is_empty());
+
+        // A new name takes a restart.
+        settings.device_name = "  renamed\n".into();
+        profile.save_settings(&settings).unwrap();
+        assert_eq!(profile.settings().unwrap().device_name, "renamed");
+        assert!(pc.daemon.reload_settings().unwrap());
     }
 
     #[tokio::test]
