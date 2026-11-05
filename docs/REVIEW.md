@@ -44,8 +44,10 @@ Each line is a claim to check. "→" points at where it's enforced.
    the peer is trusted. → `UnverifiedConnection::authorize`
 5. The device ID is computed the same way everywhere (SPKI DER, not the whole certificate,
    which is regenerated on every start). → `DeviceId::of_certificate`
-6. A peer that is no longer paired (forgotten on the phone) can't keep or reopen a session.
-   → `session.rs`, `ffi/src/lib.rs` (`forget`)
+6. A peer that is no longer paired (forgotten on the phone or on the PC) can't keep or reopen a
+   session; one being set up while it is forgotten is closed too. → `session.rs`
+   (`Peers::disconnect`), `desktop/src/daemon.rs` (`Daemon::forget`, `connected`),
+   `ffi/src/lib.rs` (`forget`)
 
 ### Pairing
 7. An unknown device can do nothing but send one `PairRequest`, and only while a window is
@@ -107,8 +109,6 @@ Each line is a claim to check. "→" points at where it's enforced.
 
 ## Known gaps (not bugs to report, but worth an opinion)
 
-- The PC can't revoke a paired phone (only edit `devices.toml`). Planned before 0.1 is
-  announced widely.
 - The identity key is a file, not in the OS keystore (v0.2).
 - No forward-secrecy concerns beyond TLS 1.3's own; no replay protection beyond TLS.
 - mDNS announces the device name to the local network.

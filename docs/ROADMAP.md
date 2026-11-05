@@ -106,7 +106,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
   27 properties to check
 - [x] Pairing from the tray: a *Pair a phone* window with the QR code, opened by itself on the
   first start, so no terminal is needed
-- [ ] PC side can revoke a paired phone (`SECURITY.md`, known gaps), before 0.1 is announced
+- [x] PC side can revoke a paired phone: `pasteget forget <name>`, or the tray menu → the phone
+  → *Forget this device*; its session ends at once
 
 ## v0.2 — "smart"
 History + search, 2FA codes, PC-side OCR, sensitive filters, auto-crop, smart actions.

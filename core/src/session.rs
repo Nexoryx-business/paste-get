@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until, timeout};
 
 use crate::clip::{self, Clip, ClipReceiver, Received};
@@ -97,6 +97,8 @@ pub struct Peers {
 struct PeerQueue {
     session: u64,
     sender: mpsc::Sender<Outgoing>,
+    /// Ends the session: the device was unpaired.
+    kick: Arc<Notify>,
 }
 
 #[derive(Debug)]
@@ -149,11 +151,32 @@ impl Peers {
         self.lock().contains_key(peer)
     }
 
-    fn register(&self, peer: DeviceId, sender: mpsc::Sender<Outgoing>) -> u64 {
+    /// Ends the session with `peer`, if one runs: call it after unpairing the device, so it
+    /// doesn't stay connected until it hangs up. Returns whether a session was ended.
+    pub fn disconnect(&self, peer: &DeviceId) -> bool {
+        match self.lock().get(peer) {
+            Some(queue) => {
+                // Stored if the session isn't waiting yet.
+                queue.kick.notify_one();
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn register(&self, peer: DeviceId, sender: mpsc::Sender<Outgoing>) -> (u64, Arc<Notify>) {
         let session = self.next_session.fetch_add(1, Ordering::Relaxed);
+        let kick = Arc::new(Notify::new());
         // A newer session replaces an older one that hasn't noticed it's dead yet.
-        self.lock().insert(peer, PeerQueue { session, sender });
-        session
+        self.lock().insert(
+            peer,
+            PeerQueue {
+                session,
+                sender,
+                kick: Arc::clone(&kick),
+            },
+        );
+        (session, kick)
     }
 
     /// Forgets `session`. Returns `false` if a newer session with the device replaced it.
@@ -189,11 +212,12 @@ where
     let (reader, writer) = connection.into_split();
     let (sender, queue) = mpsc::channel(OUTGOING_QUEUE);
     let awaiting = AwaitingAck::default();
+    let (session, kick) = peers.register(peer, sender.clone());
     let mut guard = SessionGuard {
         peers,
         events,
         peer,
-        session: peers.register(peer, sender.clone()),
+        session,
         was_current: None,
         writer: Some(tokio::spawn(write_loop(
             writer,
@@ -203,7 +227,13 @@ where
     };
     events.connected(peer, &their_hello);
 
-    let result = read_loop(peer, reader, &sender, &awaiting, events).await;
+    let result = tokio::select! {
+        result = read_loop(peer, reader, &sender, &awaiting, events) => result,
+        () = kick.notified() => {
+            tracing::info!(%peer, "session ended: the device was unpaired");
+            Err(SessionError::Closed)
+        }
+    };
 
     // Graceful end: once no queue sender is left, the writer flushes and closes the connection.
     guard.unregister();
@@ -523,6 +553,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unpaired_device_is_disconnected() {
+        let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let (phone_io, pc_io) = duplex(64 * 1024);
+        let (client, server) = tokio::join!(
+            transport::connect(phone_io, &phone, pc.device_id()),
+            async { transport::accept(pc_io, &pc).await?.authorize(|_| true) }
+        );
+        let (phone_peers, pc_peers) = (Arc::new(Peers::new()), Arc::new(Peers::new()));
+        let pc_events = Arc::new(Recorder::default());
+        let phone_session = tokio::spawn({
+            let peers = Arc::clone(&phone_peers);
+            async move {
+                run_session(
+                    client.unwrap(),
+                    hello("phone"),
+                    &peers,
+                    &Recorder::default(),
+                )
+                .await
+            }
+        });
+        let pc_session = tokio::spawn({
+            let (peers, events) = (Arc::clone(&pc_peers), Arc::clone(&pc_events));
+            async move { run_session(server.unwrap(), hello("pc"), &peers, &*events).await }
+        });
+        until(|| pc_peers.is_connected(&phone.device_id())).await;
+
+        assert!(pc_peers.disconnect(&phone.device_id()));
+
+        let ended = timeout(Duration::from_secs(5), pc_session)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(ended, Err(SessionError::Closed)));
+        assert!(!pc_peers.is_connected(&phone.device_id()));
+        assert_eq!(*pc_events.disconnected.lock().unwrap(), [phone.device_id()]);
+        // The phone sees the connection close.
+        assert!(timeout(Duration::from_secs(5), phone_session).await.is_ok());
+        // Nothing left to end.
+        assert!(!pc_peers.disconnect(&phone.device_id()));
+    }
+
+    #[tokio::test]
     async fn sessions_deliver_broadcast_clips_both_ways() {
         let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
         let (phone_io, pc_io) = duplex(64 * 1024);
@@ -662,8 +735,8 @@ mod tests {
         let (old, _a) = mpsc::channel(1);
         let (new, _b) = mpsc::channel(1);
 
-        let old_session = peers.register(id, old);
-        let new_session = peers.register(id, new);
+        let (old_session, _) = peers.register(id, old);
+        let (new_session, _) = peers.register(id, new);
 
         assert!(!peers.unregister(id, old_session));
         assert!(peers.is_connected(&id));

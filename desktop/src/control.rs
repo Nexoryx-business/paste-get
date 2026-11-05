@@ -14,9 +14,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use data_encoding::BASE64;
 use pasteget_core::clip::mime;
+use pasteget_core::identity::DeviceId;
 use pasteget_core::pairing::{PAIRING_TTL, PairingInvite};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -25,7 +26,7 @@ use tokio::task::JoinHandle;
 
 use crate::clipboard::Content;
 use crate::config::Profile;
-use crate::daemon::{Daemon, Event};
+use crate::daemon::{Daemon, DeviceStatus, Event};
 use crate::recent;
 
 /// Longest request line accepted: a 64 MiB clip, base64-encoded, plus some room.
@@ -54,6 +55,10 @@ pub enum Request {
     CopyRecent {
         id: u64,
     },
+    /// Unpairs a device, given by its ID or by its name when no other device has it.
+    Forget {
+        device: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +73,7 @@ pub enum Response {
     Paused { paused: bool },
     Recent { clips: Vec<RecentReply> },
     Copied,
+    Forgotten(DeviceReply),
     Error { message: String },
 }
 
@@ -389,6 +395,15 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
                     .write_all(line_of(Response::Copied).as_bytes())
                     .await?;
             }
+            Request::Forget { device } => {
+                let id = find_device(&daemon.status().await.devices, &device)?;
+                let device = daemon.forget(&id)?;
+                let response = Response::Forgotten(DeviceReply {
+                    id: device.id.to_string(),
+                    name: device.name,
+                });
+                write_half.write_all(line_of(response).as_bytes()).await?;
+            }
         }
         Ok(())
     }
@@ -401,6 +416,32 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(daemon: Arc<Daemon>, stream: 
         let _ = write_half.write_all(line_of(response).as_bytes()).await;
     }
     let _ = write_half.shutdown().await;
+}
+
+/// The paired device that `query` names: its ID, or its name (any case) if only one device has
+/// that name.
+fn find_device(devices: &[DeviceStatus], query: &str) -> Result<DeviceId> {
+    let query = query.trim();
+    if let Some(device) = devices.iter().find(|d| d.device.id.to_string() == query) {
+        return Ok(device.device.id);
+    }
+    let named: Vec<_> = devices
+        .iter()
+        .filter(|d| d.device.name.to_lowercase() == query.to_lowercase())
+        .collect();
+    match named[..] {
+        [device] => Ok(device.device.id),
+        [] => bail!("no paired device is called {query:?}; `pasteget status` lists them"),
+        _ => bail!(
+            "{} devices are called {query:?}; give the ID instead: {}",
+            named.len(),
+            named
+                .iter()
+                .map(|d| d.device.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 fn line_of(response: Response) -> String {
@@ -447,7 +488,9 @@ pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 mod tests {
     use super::*;
     use crate::clipboard::{MemoryClipboard, Raw};
+    use crate::config::KnownDevice;
     use crate::daemon::DaemonOptions;
+    use pasteget_core::identity::Identity;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     struct Running {
@@ -559,6 +602,46 @@ mod tests {
         };
         assert_eq!(status.devices.len(), 1);
         assert!(status.devices[0].connected);
+
+        // `pasteget forget <id>` unpairs it.
+        let laptop_id = laptop.daemon.device_id().to_string();
+        let forgotten = ask(
+            &pc.endpoint,
+            Request::Forget {
+                device: laptop_id.clone(),
+            },
+        )
+        .await;
+        assert!(matches!(&forgotten[..], [Response::Forgotten(d)] if d.id == laptop_id));
+        let status = ask(&pc.endpoint, Request::Status).await;
+        assert!(matches!(&status[..], [Response::Status(s)] if s.devices.is_empty()));
+        let again = ask(&pc.endpoint, Request::Forget { device: laptop_id }).await;
+        assert!(matches!(&again[..], [Response::Error { .. }]));
+    }
+
+    #[test]
+    fn devices_are_found_by_id_or_unique_name() {
+        let device = |name: &str| DeviceStatus {
+            device: KnownDevice {
+                id: Identity::generate().unwrap().device_id(),
+                name: name.into(),
+                addresses: Vec::new(),
+            },
+            connected: false,
+        };
+        let devices = [device("POCO M8"), device("Pixel"), device("Pixel")];
+
+        assert_eq!(
+            find_device(&devices, "poco m8").unwrap(),
+            devices[0].device.id
+        );
+        assert_eq!(
+            find_device(&devices, &devices[2].device.id.to_string()).unwrap(),
+            devices[2].device.id
+        );
+        let ambiguous = find_device(&devices, "Pixel").unwrap_err().to_string();
+        assert!(ambiguous.contains(&devices[1].device.id.to_string()));
+        assert!(find_device(&devices, "Galaxy").is_err());
     }
 
     #[tokio::test]

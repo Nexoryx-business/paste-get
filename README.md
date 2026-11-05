@@ -30,6 +30,7 @@ cargo build --release
 ./target/release/pasteget daemon        # keep it running
 ./target/release/pasteget pair          # shows a pairing QR code
 ./target/release/pasteget status
+./target/release/pasteget forget <name> # unpairs a device
 ./target/release/pasteget-tray          # or: a tray icon that runs the daemon for you
 ```
 

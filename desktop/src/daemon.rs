@@ -11,6 +11,7 @@
 //! Devices that paired with us (phones) connect in. Devices we paired with by scanning their
 //! code (`pasteget join`) are dialed out and redialed after disconnects.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -26,7 +27,7 @@ use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, RECONNECT_MIN, Sess
 use pasteget_core::transport;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc, watch};
-use tokio::task::JoinSet;
+use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{sleep, timeout};
 
 use crate::clipboard::{ClipboardBackend, ClipboardWatcher, Content, DEFAULT_POLL_INTERVAL};
@@ -118,6 +119,8 @@ struct Shared {
     recent: Mutex<RecentClips>,
     events: broadcast::Sender<Event>,
     tasks: Mutex<JoinSet<()>>,
+    /// The redial loops of devices we joined, to stop when one is unpaired.
+    dialers: Mutex<HashMap<DeviceId, AbortHandle>>,
 }
 
 impl Daemon {
@@ -156,6 +159,7 @@ impl Daemon {
             recent: Mutex::new(RecentClips::default()),
             events,
             tasks: Mutex::new(JoinSet::new()),
+            dialers: Mutex::new(HashMap::new()),
         });
 
         shared.spawn(accept_loop(Arc::clone(&shared), listener));
@@ -166,7 +170,7 @@ impl Daemon {
             .cloned()
             .collect();
         for device in joined {
-            shared.spawn(dial_loop(Arc::clone(&shared), device));
+            shared.start_dialer(device);
         }
 
         // Announcing is a convenience: pairing codes carry addresses anyway.
@@ -257,8 +261,7 @@ impl Daemon {
                 Ok(Ok(paired)) => {
                     let device = KnownDevice::joined(paired, invite.addresses.clone());
                     self.shared.remember(device.clone())?;
-                    self.shared
-                        .spawn(dial_loop(Arc::clone(&self.shared), device.clone()));
+                    self.shared.start_dialer(device.clone());
                     return Ok(device);
                 }
                 Ok(Err(e)) => last_error = e.context(format!("pairing through {address} failed")),
@@ -279,6 +282,23 @@ impl Daemon {
         };
         self.shared.remember_clip(&clip, None);
         self.shared.peers.broadcast(&clip, None)
+    }
+
+    /// Unpairs a device: it's no longer trusted, its connection ends now, and it can only come
+    /// back by pairing again.
+    pub fn forget(&self, id: &DeviceId) -> Result<KnownDevice> {
+        let device = {
+            let mut known = lock(&self.shared.known);
+            let device = known.remove(id).context("no paired device with this ID")?;
+            self.shared.profile.save_known_devices(&known)?;
+            device
+        };
+        if let Some(dialer) = lock(&self.shared.dialers).remove(id) {
+            dialer.abort();
+        }
+        self.shared.peers.disconnect(id);
+        tracing::info!(device = %device.name, id = %device.id, "unpaired");
+        Ok(device)
     }
 
     /// Sends what's on the clipboard now, even while paused. Returns how many devices it was
@@ -354,10 +374,18 @@ impl Drop for Daemon {
 }
 
 impl Shared {
-    fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) {
+    fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> AbortHandle {
         let mut tasks = lock(&self.tasks);
         while tasks.try_join_next().is_some() {}
-        tasks.spawn(task);
+        tasks.spawn(task)
+    }
+
+    fn start_dialer(self: &Arc<Self>, device: KnownDevice) {
+        let id = device.id;
+        let handle = self.spawn(dial_loop(Arc::clone(self), device));
+        if let Some(previous) = lock(&self.dialers).insert(id, handle) {
+            previous.abort();
+        }
     }
 
     fn hello(&self) -> Hello {
@@ -471,6 +499,12 @@ impl Shared {
 /// Received clips go to the clipboard and on to the other devices.
 impl SessionEvents for Shared {
     fn connected(&self, peer: DeviceId, hello: &Hello) {
+        // Unpaired while this connection was being set up: [`Daemon::forget`] came too early to
+        // end it.
+        if !lock(&self.known).contains(&peer) {
+            self.peers.disconnect(&peer);
+            return;
+        }
         tracing::info!(device = %hello.device_name, id = %peer, "connected");
     }
 
@@ -759,6 +793,52 @@ mod tests {
         assert!(!status.pairing_open);
         assert_eq!(status.devices.len(), 1);
         assert_eq!(status.devices[0].device.id, laptop.daemon.device_id());
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_device_is_disconnected_and_cannot_come_back() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+
+        let forgotten = pc.daemon.forget(&laptop.daemon.device_id()).unwrap();
+        assert_eq!(forgotten.name, "laptop");
+        assert!(pc.daemon.status().await.devices.is_empty());
+        assert!(pc.daemon.forget(&laptop.daemon.device_id()).is_err());
+
+        // The laptop still trusts the PC and keeps redialing; the PC refuses it.
+        assert!(wait_for_async(|| async { !connected(&laptop.daemon).await }).await);
+        sleep(Duration::from_millis(300)).await;
+        assert!(!connected(&laptop.daemon).await);
+        laptop.clipboard.set(Raw::Text("after unpairing".into()));
+        sleep(Duration::from_millis(100)).await;
+        assert_ne!(
+            pc.clipboard.get(),
+            Some(Raw::Text("after unpairing".into()))
+        );
+
+        // It survives a restart: the device is gone from the file too.
+        let known = pc.daemon.shared.profile.known_devices().unwrap();
+        assert!(!known.contains(&laptop.daemon.device_id()));
+    }
+
+    #[tokio::test]
+    async fn the_pc_can_forget_a_device_it_joined() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&laptop.daemon)).await);
+
+        laptop.daemon.forget(&pc.daemon.device_id()).unwrap();
+
+        // Its dialer stopped: the PC sees no connection coming back.
+        assert!(wait_for_async(|| async { !connected(&pc.daemon).await }).await);
+        sleep(Duration::from_millis(300)).await;
+        assert!(!connected(&pc.daemon).await);
+        assert!(laptop.daemon.status().await.devices.is_empty());
     }
 
     #[tokio::test]

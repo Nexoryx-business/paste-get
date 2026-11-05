@@ -43,6 +43,7 @@ The full protocol is in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 | Passwords ending up in logs | Logs contain sizes, MIME types and hashes only, never clipboard contents |
 | Passwords lingering | Clips marked sensitive (password managers) skip clipboard history on Windows and the tray's *Recent* list |
 | Oversized or malformed input from a paired device | Frames are limited to 1 MiB, clips to 64 MiB, images are size-checked before decoding; the parsers are fuzzed |
+| A lost or stolen phone, once you unpair it | On the PC: tray menu → the phone → *Forget this device*, or `pasteget forget <name>`. Its connection ends at once and it can't connect again without a new pairing code. The phone can forget a PC the same way |
 
 ## The built-in mode (wireless debugging)
 
@@ -60,9 +61,8 @@ running `adb`: that is how it starts its shell helper. Consequences:
 
 - **A photographed QR code.** Someone who sees the code can pair within the 5 minutes, before
   you do. Pair where nobody can see the screen.
-- **A stolen or lost phone.** It stays paired. The phone can forget a PC, but **the PC can't
-  revoke a phone yet**: the only way today is to stop paste-get and delete the device from
-  `devices.toml` in the profile directory.
+- **A stolen or lost phone, until you unpair it.** It stays paired and keeps receiving what you
+  copy whenever it is on the same network. Unpair it from the PC as soon as you can (above).
 - **A compromised paired device.** Paired devices are trusted with your clipboard: anything you
   copy goes to them.
 - **Malware running as you on the PC or phone.** It can read the clipboard anyway, and the

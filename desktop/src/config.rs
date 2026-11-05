@@ -233,6 +233,12 @@ impl KnownDevices {
     pub fn iter(&self) -> impl Iterator<Item = &KnownDevice> {
         self.0.iter()
     }
+
+    /// Removes a device. Returns it, if it was there.
+    pub fn remove(&mut self, id: &DeviceId) -> Option<KnownDevice> {
+        let index = self.0.iter().position(|device| device.id == *id)?;
+        Some(self.0.remove(index))
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]

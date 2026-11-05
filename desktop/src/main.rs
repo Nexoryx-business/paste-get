@@ -80,6 +80,11 @@ enum Command {
     Resume,
     /// List the last clips sent or received, newest first.
     Recent,
+    /// Unpair a device: it's disconnected now and can only come back by pairing again.
+    Forget {
+        /// Its name, as `pasteget status` shows it, or its ID.
+        device: String,
+    },
 }
 
 #[tokio::main]
@@ -112,6 +117,7 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Pause { toggle } => pause(&endpoint, if toggle { None } else { Some(true) }).await,
         Command::Resume => pause(&endpoint, Some(false)).await,
         Command::Recent => recent(&endpoint).await,
+        Command::Forget { device } => forget(&endpoint, device).await,
     }
 }
 
@@ -240,6 +246,25 @@ async fn send(endpoint: &Endpoint, text: Option<String>, file: Option<PathBuf>) 
         data_base64: BASE64.encode(&data),
     };
     send_request(endpoint, &request).await
+}
+
+async fn forget(endpoint: &Endpoint, device: String) -> Result<()> {
+    expect_one(
+        endpoint,
+        &Request::Forget { device },
+        |response| match response {
+            Response::Forgotten(device) => {
+                println!(
+                    "Unpaired {}. To use it again, pair it again; on a phone, forget this computer \
+                 there too.",
+                    device.name
+                );
+                true
+            }
+            _ => false,
+        },
+    )
+    .await
 }
 
 async fn send_request(endpoint: &Endpoint, request: &Request) -> Result<()> {

@@ -175,6 +175,7 @@ fn on_command<R: Runtime>(app: &AppHandle<R>, tray: &Arc<Tray>, command: Command
         }
         Command::TogglePause => Request::Pause { paused: None },
         Command::CopyRecent(id) => Request::CopyRecent { id },
+        Command::Forget(device) => Request::Forget { device },
     };
     let tray = Arc::clone(tray);
     tauri::async_runtime::spawn(async move {

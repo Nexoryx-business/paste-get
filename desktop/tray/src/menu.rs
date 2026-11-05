@@ -3,7 +3,7 @@
 //! What the tray menu shows, as plain data so it can be tested without a desktop. `main.rs`
 //! turns [`Entry`]s into Tauri menu items and menu clicks back into [`Command`]s.
 
-use pasteget_desktop::control::{RecentReply, StatusReply};
+use pasteget_desktop::control::{DeviceStatusReply, RecentReply, StatusReply};
 use pasteget_desktop::recent;
 
 pub const PAIR: &str = "pair";
@@ -11,6 +11,7 @@ pub const PAUSE: &str = "pause";
 pub const START_AT_LOGIN: &str = "start-at-login";
 pub const QUIT: &str = "quit";
 const RECENT_PREFIX: &str = "recent:";
+const FORGET_PREFIX: &str = "forget:";
 
 /// What the tray knows about the daemon.
 #[derive(Debug)]
@@ -78,6 +79,8 @@ pub enum Command {
     TogglePause,
     ToggleStartAtLogin,
     CopyRecent(u64),
+    /// Unpair the device with this ID.
+    Forget(String),
     Quit,
 }
 
@@ -88,10 +91,14 @@ impl Command {
             PAUSE => Some(Self::TogglePause),
             START_AT_LOGIN => Some(Self::ToggleStartAtLogin),
             QUIT => Some(Self::Quit),
-            _ => id
-                .strip_prefix(RECENT_PREFIX)
-                .and_then(|n| n.parse().ok())
-                .map(Self::CopyRecent),
+            _ => {
+                if let Some(device) = id.strip_prefix(FORGET_PREFIX) {
+                    return Some(Self::Forget(device.into()));
+                }
+                id.strip_prefix(RECENT_PREFIX)
+                    .and_then(|n| n.parse().ok())
+                    .map(Self::CopyRecent)
+            }
         }
     }
 }
@@ -131,10 +138,7 @@ fn daemon_entries(state: &State) -> Vec<Entry> {
                 entries.push(Entry::Info("No paired device yet".into()));
             } else {
                 entries.push(Entry::Info("Devices".into()));
-                entries.extend(status.devices.iter().map(|device| {
-                    let dot = if device.connected { "●" } else { "○" };
-                    Entry::Info(format!("{dot}  {}", text(&device.name)))
-                }));
+                entries.extend(status.devices.iter().map(device_entry));
             }
             entries.push(Entry::Action {
                 id: PAIR.into(),
@@ -156,6 +160,28 @@ fn daemon_entries(state: &State) -> Vec<Entry> {
             });
             entries
         }
+    }
+}
+
+/// "● POCO M8", with a way to unpair it one level down, so it isn't clicked by accident.
+fn device_entry(device: &DeviceStatusReply) -> Entry {
+    let dot = if device.connected { "●" } else { "○" };
+    Entry::Submenu {
+        label: format!("{dot}  {}", text(&device.name)),
+        entries: vec![
+            Entry::Info(
+                if device.connected {
+                    "Connected"
+                } else {
+                    "Not connected"
+                }
+                .into(),
+            ),
+            Entry::Action {
+                id: format!("{FORGET_PREFIX}{}", device.id),
+                label: "Forget this device".into(),
+            },
+        ],
     }
 }
 
@@ -182,7 +208,6 @@ fn text(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pasteget_desktop::control::DeviceStatusReply;
 
     fn status(paused: bool, devices: &[(&str, bool)]) -> StatusReply {
         StatusReply {
@@ -250,8 +275,8 @@ mod tests {
                 "Syncing with 1 device",
                 "---",
                 "Devices",
-                "●  POCO M8 5G",
-                "○  Laptop",
+                "●  POCO M8 5G > Connected | Forget this device",
+                "○  Laptop > Not connected | Forget this device",
                 "Pair a phone…",
                 "---",
                 "Recent > Text: hello world · POCO M8 5G, 2 min | Image (JPEG, 1.2 MB) · this computer, 2 min",
@@ -314,6 +339,10 @@ mod tests {
         );
         assert_eq!(Command::from_id("recent:42"), Some(Command::CopyRecent(42)));
         assert_eq!(Command::from_id("recent:x"), None);
+        assert_eq!(
+            Command::from_id("forget:ABC"),
+            Some(Command::Forget("ABC".into()))
+        );
         assert_eq!(Command::from_id("other"), None);
 
         // Every clickable entry maps to a command.

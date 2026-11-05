@@ -51,6 +51,9 @@ ignored, and the certificate may be regenerated at any time without changing the
   - **paired device** → normal session;
   - **pairing window open** → the client must complete pairing (section 5) as its first message;
   - **otherwise** → close the connection before reading anything.
+- **Unpairing** needs no message: the device that forgets a peer deletes its ID, closes any
+  session with it at once and stops dialing it. The peer, which still trusts it, keeps trying and
+  is refused as above until it is paired again.
 
 In version 0, the PC accepts connections and the phone connects.
 
@@ -210,7 +213,7 @@ Rules for readers:
   only travels inside TLS.
 - **Guessing is useless**: 128-bit secret, 3 attempts, 5 minutes.
 - **Not protected**: someone who photographs the QR code and pairs before the owner does within
-  the 5 minutes. The PC must show which device just paired, and allow revoking it.
+  the 5 minutes. The PC shows which device just paired, and can unpair it (section 2.3).
 
 ## 6. Echo loops
 
