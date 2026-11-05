@@ -68,6 +68,15 @@ Since Android 10, only the focused app and the default keyboard can read the cli
 
 **Decision:** automatic fallback **A → B → D**, shown on a health screen ("Mode: Shizuku ✓").
 
+**Update (November 2026): mode A without Shizuku.** Shizuku itself only gets the shell identity
+through Android's wireless debugging. The app now does the same on its own ("built-in mode"):
+it pairs its RSA key once with wireless debugging (the 6-digit code from Settings), grants itself
+`WRITE_SECURE_SETTINGS`, and from then on switches wireless debugging on for a moment whenever it
+needs to start its shell helper (also after a reboot, on Wi-Fi), then off again. No other app to
+install, nothing to restart by hand, and no dependency on Shizuku, whose official build fails on
+Android 17. The ADB client is in `ffi/src/wireless_adb` (rustls, ring, BoringSSL's SPAKE2), the
+helper in `ShellHelper.kt`. Order is now built-in → A (Shizuku) → B → D. *(verify on HyperOS)*
+
 **Key idea:** also use Shizuku as a **one-time permission granter**: `READ_LOGS`,
 `SYSTEM_ALERT_WINDOW`, `RECEIVE_SENSITIVE_NOTIFICATIONS`, usage stats. These grants persist after
 a reboot, so when Shizuku is down the app drops to mode B instead of stopping, and offers a

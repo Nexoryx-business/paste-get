@@ -44,6 +44,18 @@ The full protocol is in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 | Passwords lingering | Clips marked sensitive (password managers) skip clipboard history on Windows and the tray's *Recent* list |
 | Oversized or malformed input from a paired device | Frames are limited to 1 MiB, clips to 64 MiB, images are size-checked before decoding; the parsers are fuzzed |
 
+## The built-in mode (wireless debugging)
+
+To copy automatically without Shizuku, the app pairs itself with Android's wireless debugging,
+once, with the code Settings shows. Its key then gives it the same rights as a paired computer
+running `adb`: that is how it starts its shell helper. Consequences:
+- The key is a file only the app can read, and it is never backed up. Taking it would need root
+  or a debugging session already open on the phone, which give full control anyway.
+- The app only connects to the phone itself, and switches wireless debugging off again as soon
+  as the helper runs; it switches it on for a moment only on Wi-Fi.
+- To revoke it: Settings → Developer options → Wireless debugging → Paired devices → paste-get →
+  Forget, or "Pair again" in the app.
+
 ## What it doesn't protect against (yet)
 
 - **A photographed QR code.** Someone who sees the code can pair within the 5 minutes, before

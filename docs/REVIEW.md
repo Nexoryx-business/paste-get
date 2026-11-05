@@ -24,6 +24,8 @@ make trust decisions. In order of risk:
 | `desktop/src/control.rs` | Local control channel: Unix socket in a 0700 directory, Windows named pipe | ~550 |
 | `desktop/src/config.rs` | Key file permissions (0600), profile names (path traversal) | part |
 | `ffi/src/lib.rs` | The same decisions on the phone side, through the core | part |
+| `ffi/src/wireless_adb/` | ADB client for the phone's own wireless debugging: pairing (TLS 1.3 + BoringSSL SPAKE2 + AES-GCM), `exec:` over TLS | ~700 |
+| `android/…/ShellHelper.kt`, `ShellLinkServer.kt`, `BuiltInShell.kt` | The shell helper the app starts through it, and the local socket between them | ~600 |
 
 The protocol itself is specified in `docs/PROTOCOL.md`; the review should also say whether the
 code matches it.
@@ -85,6 +87,21 @@ Each line is a claim to check. "→" points at where it's enforced.
 22. Only this app can call the Shizuku service, which runs as `shell`. Shizuku hands the
     service's binder to the app that bound it; the service doesn't check the caller's UID itself.
     Is that enough? → `ShellClipboardService`, `IShellClipboard.aidl`
+
+### Built-in mode (wireless debugging, no Shizuku)
+23. The ADB client only connects to loopback or this phone's own addresses. → `check_local`
+24. Pairing: the password is the code plus 64 bytes exported from the TLS session (label
+    `adb-label\0`), SPAKE2 is BoringSSL's with AOSP's names, the AES-128-GCM key comes from HKDF
+    as in `aes_128_gcm.cpp`, nonces never repeat. Compare with AOSP `pairing_connection.cpp` and
+    `pairing_auth.cpp`.
+25. adbd's server certificate is not verified, by necessity (adbd makes a random key at every
+    start; Google's client accepts any). Is the reasoning in the module's SECURITY note sound?
+26. The local socket: the app only listens to UID 2000 or 0 running this very build; the helper
+    only talks to a socket owned by the app's UID. Can another app squat the abstract name in
+    a way that matters? → `ShellLinkServer`, `ShellHelper`
+27. The app's RSA key (`files/adb.key`) gives full adb access to the phone while wireless
+    debugging is on. It is private to the app, never backed up (`allowBackup=false`), and the app
+    switches wireless debugging off again after starting the helper.
 
 ## Known gaps (not bugs to report, but worth an opinion)
 

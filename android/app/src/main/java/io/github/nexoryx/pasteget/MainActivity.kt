@@ -3,6 +3,7 @@
 package io.github.nexoryx.pasteget
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -95,6 +96,7 @@ class MainActivity : ComponentActivity() {
             PasteGetTheme {
                 val connected by pasteGet.connected.collectAsStateWithLifecycle()
                 val lastDelivery by pasteGet.lastDelivery.collectAsStateWithLifecycle()
+                val builtIn by pasteGet.autoCopy.builtIn.state.collectAsStateWithLifecycle()
                 val shizuku by pasteGet.autoCopy.shizuku.state.collectAsStateWithLifecycle()
                 val logs by pasteGet.autoCopy.logs.state.collectAsStateWithLifecycle()
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
@@ -113,9 +115,13 @@ class MainActivity : ComponentActivity() {
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
                     onOpenSettings = ::openAppSettings,
-                    autoCopy = AutoCopyCardState(copiesOn, shizuku, logs, fallback, lastCopy),
+                    autoCopy = AutoCopyCardState(copiesOn, builtIn, shizuku, logs, fallback, lastCopy),
                     autoCopyActions = AutoCopyActions(
                         onChange = ::setSendCopies,
+                        onSetUpBuiltIn = ::setUpBuiltIn,
+                        onOpenWirelessDebugging = ::openWirelessDebugging,
+                        onRetryBuiltIn = pasteGet.autoCopy.builtIn::retry,
+                        onResetBuiltIn = pasteGet.autoCopy.builtIn::reset,
                         onAllowShizuku = pasteGet.autoCopy.shizuku::requestPermission,
                         onOpenShizuku = ::openShizuku,
                         onGetShizuku = ::getShizuku,
@@ -229,6 +235,24 @@ class MainActivity : ComponentActivity() {
         copiesOn = on
         // The service picks up the change.
         SyncService.start(this)
+    }
+
+    /** Shows the code notification, then Settings, where the user asks for a pairing code. */
+    private fun setUpBuiltIn() {
+        pasteGet.autoCopy.builtIn.beginPairing()
+        openWirelessDebugging()
+    }
+
+    private fun openWirelessDebugging() {
+        val developerOptions = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            // Scrolls to "Wireless debugging" on Pixel-like settings, ignored elsewhere.
+            .putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
+        try {
+            startActivity(developerOptions)
+        } catch (e: ActivityNotFoundException) {
+            // Developer options are off: "About phone" is where they're turned on.
+            startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS))
+        }
     }
 
     private fun openShizuku() {
@@ -428,6 +452,7 @@ private fun LastDeliveryText(delivery: LastDelivery) {
 /** What the automatic copy card shows. */
 private data class AutoCopyCardState(
     val on: Boolean,
+    val builtIn: BuiltInState,
     val shizuku: ShizukuState,
     val logs: LogStatus,
     val fallback: FallbackAccess,
@@ -436,6 +461,10 @@ private data class AutoCopyCardState(
 
 private class AutoCopyActions(
     val onChange: (Boolean) -> Unit,
+    val onSetUpBuiltIn: () -> Unit,
+    val onOpenWirelessDebugging: () -> Unit,
+    val onRetryBuiltIn: () -> Unit,
+    val onResetBuiltIn: () -> Unit,
     val onAllowShizuku: () -> Unit,
     val onOpenShizuku: () -> Unit,
     val onGetShizuku: () -> Unit,
@@ -461,11 +490,14 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
             }
             if (state.on) {
                 // What isn't working yet, and the step that fixes it.
-                if (state.shizuku.status != ShizukuStatus.WATCHING) {
-                    ShizukuLine(state.shizuku, actions)
-                    LogLine(state.logs, actions)
+                val builtInSetUp = state.builtIn.status != BuiltInStatus.NOT_SET_UP &&
+                    state.builtIn.status != BuiltInStatus.PAIRING && state.builtIn.status != BuiltInStatus.OFF
+                if (state.builtIn.status != BuiltInStatus.WATCHING) {
+                    BuiltInLine(state.builtIn, actions)
+                    if (!builtInSetUp && state.shizuku.status != ShizukuStatus.WATCHING) ShizukuLine(state.shizuku, actions)
+                    if (state.shizuku.status != ShizukuStatus.WATCHING) LogLine(state.logs, actions)
                 }
-                FallbackLine(state.shizuku, state.fallback, actions)
+                if (!builtInSetUp) FallbackLine(state.shizuku, state.fallback, actions)
                 state.lastCopy?.let { LastCopyText(it) }
             }
         }
@@ -474,10 +506,41 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
 
 /** The health of the automatic copy in one line: how copies are read right now. */
 @Composable
-private fun modeText(state: AutoCopyCardState): String = when (CopyMode.of(state.shizuku, state.logs)) {
+private fun modeText(state: AutoCopyCardState): String = when (CopyMode.of(state.builtIn, state.shizuku, state.logs)) {
+    CopyMode.BUILT_IN -> stringResource(R.string.mode_builtin)
     CopyMode.SHIZUKU -> stringResource(R.string.mode_shizuku, state.shizuku.detail.orEmpty())
     CopyMode.LOGS -> stringResource(R.string.mode_logs)
     CopyMode.MANUAL -> stringResource(R.string.mode_manual)
+}
+
+/** The built-in mode: set it up, or what keeps it from running. */
+@Composable
+private fun BuiltInLine(builtIn: BuiltInState, actions: AutoCopyActions) {
+    val detail = builtIn.detail.orEmpty()
+    when (builtIn.status) {
+        BuiltInStatus.OFF, BuiltInStatus.WATCHING -> {}
+        BuiltInStatus.NOT_SET_UP -> {
+            Text(stringResource(R.string.builtin_offer), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = actions.onSetUpBuiltIn) { Text(stringResource(R.string.builtin_set_up)) }
+        }
+        BuiltInStatus.PAIRING -> {
+            Text(stringResource(R.string.builtin_pairing_steps), style = MaterialTheme.typography.bodySmall)
+            if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall)
+            Row {
+                TextButton(onClick = actions.onOpenWirelessDebugging) { Text(stringResource(R.string.builtin_open_settings)) }
+                TextButton(onClick = actions.onResetBuiltIn) { Text(stringResource(R.string.builtin_cancel)) }
+            }
+        }
+        BuiltInStatus.STARTING -> Text(stringResource(R.string.builtin_starting), style = MaterialTheme.typography.bodySmall)
+        BuiltInStatus.NEEDS_WIFI -> Text(stringResource(R.string.builtin_needs_wifi), style = MaterialTheme.typography.bodySmall)
+        BuiltInStatus.FAILED -> {
+            Text(stringResource(R.string.builtin_failed, detail), style = MaterialTheme.typography.bodySmall)
+            Row {
+                TextButton(onClick = actions.onRetryBuiltIn) { Text(stringResource(R.string.builtin_retry)) }
+                TextButton(onClick = actions.onResetBuiltIn) { Text(stringResource(R.string.builtin_pair_again)) }
+            }
+        }
+    }
 }
 
 @Composable

@@ -27,6 +27,12 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- The built-in mode switches wireless debugging on for a moment after a restart, to start
+         its shell helper. The app grants itself this once, through wireless debugging. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- To tell "Shizuku is not installed" from "Shizuku is not running". -->
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
@@ -132,6 +138,11 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- The code typed in the built-in mode's pairing notification. -->
+        <receiver
+            android:name=".BuiltInShell$PairingCodeReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

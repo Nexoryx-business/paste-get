@@ -4,7 +4,7 @@ Automated tests use in-memory clipboards. Only real machines can show whether th
 clipboard** works. Sections 1–4 test the desktop daemon on its own; section 5 adds the phone,
 section 6 automatic screenshots, section 7 the way back, from the PC to the phone, section 8
 the automatic copy on the phone, section 9 the tray app, section 10 starting at login and
-section 11 the hotkeys.
+section 11 the hotkeys, and section 12 the copy on the phone without Shizuku.
 
 The trick: on one computer, run the real daemon (system clipboard) **and** a second "fake phone"
 daemon with a private in-memory clipboard. Whatever reaches the fake phone came out of your real
@@ -366,6 +366,41 @@ How each desktop gets them:
 | H3 | Copy some text, then press `Ctrl+Alt+Shift+V` | "Clipboard sent to 1 device"; the fake phone logs `clip received` |
 | H4 | Press `Ctrl+Alt+Shift+P` again | "Syncing resumed" |
 | H5 | On a layout with `AltGr` (Albanian, German, Polish…), type `@` in a text editor | It types normally |
+
+## 12. Copy on the phone without Shizuku (built-in mode, prototype)
+
+paste-get can do what Shizuku does by itself: it pairs with Android's **wireless debugging**
+once, then starts its own helper as the shell user whenever needed, even after a restart of the
+phone (on Wi-Fi). No other app, nothing to restart by hand. It's new and experimental: please
+report what happens.
+
+**Once, to set up** (the phone on Wi-Fi):
+1. Developer options must be on: Settings → About phone → tap *OS version* (HyperOS) or *Build
+   number* seven times.
+2. In paste-get, turn on **Send what you copy**, then tap **Set up without Shizuku**. A
+   notification "Pair paste-get with wireless debugging" appears, and Developer options open.
+3. Turn on **Wireless debugging** (allow it on this network), tap it, then **Pair device with
+   pairing code**. A 6-digit code shows.
+4. Without leaving that screen, pull down the notifications and type the code in paste-get's
+   notification (**Enter code**).
+5. The notification goes away, and the card says "Mode: built-in, as shell, without Shizuku".
+   You can turn Wireless debugging off: paste-get switches it on for a moment when it needs it,
+   then off again.
+
+If Shizuku was set up, the built-in mode replaces it; you can uninstall Shizuku.
+
+| # | Do this | Expected |
+|---|---|---|
+| W1 | Set up as above | "Paired devices" in Wireless debugging lists **paste-get**; the card says "Mode: built-in" |
+| W2 | Copy text in any app, paste on the PC | Pasted. Android shows "Shell pasted from your clipboard", as with Shizuku |
+| W3 | Turn Wireless debugging off by hand, copy again | Still works (the helper runs on its own) |
+| W4 | Restart the phone, unlock it, wait a minute on Wi-Fi, copy text | Pasted on the PC, without opening paste-get. Wireless debugging is off again afterwards |
+| W5 | Restart the phone with Wi-Fi off | The card says "waiting for Wi-Fi"; turn Wi-Fi on: it starts by itself |
+| W6 | In Wireless debugging → Paired devices, forget paste-get, then restart the phone | The card says "wireless debugging no longer knows paste-get: pair again" |
+| W7 | **Pair again** in the card | Back to step 2 |
+
+If a step fails, the card shows why. **Please report that text**, and, if you can, the log:
+`adb logcat -s paste-get` (lines start with "built-in mode" or "shell helper").
 
 ## Known limitations
 

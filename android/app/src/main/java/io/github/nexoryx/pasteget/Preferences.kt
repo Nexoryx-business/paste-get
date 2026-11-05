@@ -10,6 +10,7 @@ object Preferences {
     private const val FILE = "settings"
     private const val SEND_SCREENSHOTS = "send_screenshots"
     private const val SEND_COPIES = "send_copies"
+    private const val BUILT_IN_PAIRED = "built_in_paired"
 
     /** Off until the user turns it on and grants photo access. */
     fun sendScreenshots(context: Context): Boolean =
@@ -25,5 +26,13 @@ object Preferences {
 
     fun setSendCopies(context: Context, send: Boolean) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putBoolean(SEND_COPIES, send) }
+    }
+
+    /** Whether the app's key is paired with wireless debugging ([BuiltInShell]). */
+    fun builtInPaired(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(BUILT_IN_PAIRED, false)
+
+    fun setBuiltInPaired(context: Context, paired: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putBoolean(BUILT_IN_PAIRED, paired) }
     }
 }

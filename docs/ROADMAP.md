@@ -39,7 +39,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] `connectedDevice` foreground service with status notification
 - [x] Pairing by scanning the QR code (in-app scanner or system camera)
 - [x] Manual sending: share sheet + Quick Settings tile
-- [ ] Verified on the POCO M8 5G
+- [x] Verified on the POCO M8 5G (and a Samsung phone), with Windows 11, November 2026
 - **Done when:** sharing text from the POCO puts it on the PC clipboard.
   ✅ in `ffi/tests/phone_and_pc.rs` against a real daemon; pending on the real phone.
 
@@ -49,7 +49,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] Send the image (JPEG as it is, other formats as PNG); the PC sets it as an image and shows a "Received ✓" notification
 - [x] Measure latency (target < 1 s on LAN): shown in the app and logged on both sides; a 2 MB
   image takes 13 ms on loopback (`ffi/tests/phone_and_pc.rs`)
-- [ ] Verified on the POCO M8 5G with Windows and Arch, latency measured on Wi-Fi
+- [ ] Verified on the POCO M8 5G with Windows and Arch, latency measured on Wi-Fi. Windows ✓ (POCO and
+  Samsung, November 2026); Arch and the Wi-Fi latency figure still to do
   (`TESTING.md`, section 6)
 - **Done when:** screenshot on the POCO → `Ctrl+V` in Discord works on Windows and Arch.
   ✅ up to the clipboard in automated tests; pending on the real devices.
@@ -59,8 +60,12 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] One-time grants through Shizuku (`READ_LOGS`, overlay)
 - [x] Mode B: `READ_LOGS` + overlay fallback
 - [x] Health screen (current mode, Shizuku state, last sync): a card on the home screen
-- [ ] Verified on the POCO M8 5G (`TESTING.md`, section 8), including which `IClipboard`
-  signatures HyperOS has and whether Android shows "pasted from your clipboard" notices
+- [x] Verified on the POCO M8 5G (`TESTING.md`, section 8), with Windows 11, November 2026.
+  HyperOS shows Android's "Shell pasted from your clipboard" notice on each copy. Which
+  `IClipboard` signature it has is still to be read from the log
+- [ ] Built-in mode, without Shizuku: the app pairs itself with wireless debugging and starts
+  its own shell helper, also after a reboot (prototype, `TESTING.md` section 12). To verify on the
+  POCO; then an option to hide the "Shell pasted" notice
 - **Done when:** copy on the phone → paste on the PC, no tap, even after the POCO reboots (mode B).
   ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`, and the app's logic in Robolectric tests;
   pending on the real phone. On Android 13+, mode B needs one tap after a reboot: Android lets an
@@ -71,7 +76,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] Text into the Android clipboard. Long texts go as a link to a file, like images: clips pass
   through Binder, whose buffer is 1 MB
 - [x] Images through `FileProvider`
-- [ ] Verified on the POCO M8 5G with Windows and Arch (`TESTING.md`, section 7)
+- [ ] Verified on the POCO M8 5G with Windows and Arch (`TESTING.md`, section 7). Windows ✓ (POCO and
+  Samsung, November 2026); Arch still to do
 - **Done when:** a PC screenshot pastes into a phone app.
   ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`; pending on the real devices.
 
@@ -96,7 +102,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] `SECURITY.md` draft: threat model, known gaps, private reporting
 - [ ] README demo GIF: needs the real devices; how to record it is in `RELEASING.md`
 - [ ] Human review of crypto and protocol code: `docs/REVIEW.md` lists the files and the
-  22 properties to check
+  27 properties to check
 - [x] Pairing from the tray: a *Pair a phone* window with the QR code, opened by itself on the
   first start, so no terminal is needed
 - [ ] PC side can revoke a paired phone (`SECURITY.md`, known gaps), before 0.1 is announced
