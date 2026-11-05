@@ -105,7 +105,9 @@ Each line is a claim to check. "→" points at where it's enforced.
     `ShellHelper`, `HiddenProviders`
 27. The app's RSA key (`files/adb.key`) gives full adb access to the phone while wireless
     debugging is on. It is private to the app, never backed up (`allowBackup=false`), and the app
-    switches wireless debugging off again after starting the helper.
+    switches wireless debugging off again after starting the helper. The `WRITE_SECURE_SETTINGS`
+    it grants itself is used for `adb_wifi_enabled` and, only when the user turns the switch on,
+    `clipboard_show_access_notifications`. → `BuiltInShell`, `AccessNotices`
 
 ## Known gaps (not bugs to report, but worth an opinion)
 

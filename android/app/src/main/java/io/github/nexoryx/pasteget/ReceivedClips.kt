@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 /**
  * Puts clips received from a computer on the phone's clipboard. Android lets any app write the
@@ -46,11 +47,15 @@ object ReceivedClips {
     /** The last clip from a computer, for the home screen. */
     val last: StateFlow<LastReceived?> = lastState.asStateFlow()
 
-    fun apply(context: Context, mimeType: String, data: ByteArray, sensitive: Boolean) {
+    /**
+     * Puts the clip on the clipboard soon, on the worker thread. The future completes once it's
+     * done: [last] alone can't tell, since a clip just like the one before leaves it unchanged.
+     */
+    fun apply(context: Context, mimeType: String, data: ByteArray, sensitive: Boolean): Future<*> {
         // Never log contents: type and size only.
         Log.i(TAG, "clip received: $mimeType, ${data.size} bytes")
         val app = context.applicationContext
-        worker.execute { put(app, mimeType, data, sensitive) }
+        return worker.submit { put(app, mimeType, data, sensitive) }
     }
 
     private fun put(context: Context, mimeType: String, data: ByteArray, sensitive: Boolean) {

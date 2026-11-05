@@ -19,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.RuntimeEnvironment
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Roadmap M6 on the phone's side: what a clip from a computer becomes on the clipboard, read back
@@ -44,15 +45,13 @@ class ReceivedClipsTest {
     private val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3)
     private val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xe0.toByte(), 4, 5, 6)
 
-    /** Applies a clip and waits until it's handled: [ReceivedClips] works on a thread of its own. */
+    /**
+     * Applies a clip and waits until it's handled: [ReceivedClips] works on a thread of its own.
+     * (Not by watching [ReceivedClips.last]: two clips of the same type and size in the same
+     * millisecond look alike, and a `StateFlow` ignores a value equal to the one it has.)
+     */
     private fun receive(mimeType: String, data: ByteArray, sensitive: Boolean = false): LastReceived {
-        val before = ReceivedClips.last.value
-        ReceivedClips.apply(app, mimeType, data, sensitive)
-        val deadline = System.currentTimeMillis() + 5_000
-        while (ReceivedClips.last.value === before) {
-            check(System.currentTimeMillis() < deadline) { "the clip was not handled" }
-            Thread.sleep(5)
-        }
+        ReceivedClips.apply(app, mimeType, data, sensitive).get(5, TimeUnit.SECONDS)
         return ReceivedClips.last.value!!
     }
 
@@ -131,6 +130,16 @@ class ReceivedClipsTest {
         assertArrayEquals(png + byteArrayOf(4), linkedBytes())
         val files = File(app.cacheDir, "clips").list().orEmpty()
         assertEquals(ClipFiles.KEEP, files.size)
+    }
+
+    @Test
+    fun theSameClipTwiceInARowIsHandledTwice() {
+        // Both may land in the same millisecond: then [ReceivedClips.last] doesn't change.
+        receive(ClipFiles.TEXT, "again".toByteArray())
+        clipboard.setPrimaryClip(ClipData.newPlainText("other app", "meanwhile"))
+
+        assertTrue(receive(ClipFiles.TEXT, "again".toByteArray()).onClipboard)
+        assertEquals("again", clip.getItemAt(0).text)
     }
 
     @Test
