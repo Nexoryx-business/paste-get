@@ -99,6 +99,10 @@ pub trait PhoneListener: Send + Sync {
 
     /// A computer acknowledged a clip sent with `send_text` or `send_image`.
     fn on_clip_delivered(&self, delivery: ClipDelivery);
+
+    /// `computer` unpaired this phone. It is already forgotten here and no longer dialed: tell
+    /// the user, who can pair again.
+    fn on_unpaired(&self, computer: PairedComputer);
 }
 
 #[derive(uniffi::Object)]
@@ -376,6 +380,26 @@ impl State {
 }
 
 impl SessionEvents for State {
+    /// The computer unpaired this phone: forget it too. Its dialer is the caller, and ends by
+    /// itself.
+    fn unpaired_by(&self, peer: DeviceId) {
+        let id = peer.to_string();
+        let removed = {
+            let mut computers = lock(&self.computers);
+            let removed = computers
+                .iter()
+                .position(|c| c.device_id == id)
+                .map(|i| computers.remove(i));
+            if removed.is_some() {
+                let _ = save_computers(&self.data_dir, &computers);
+            }
+            removed
+        };
+        if let (Some(computer), Some(listener)) = (removed, self.listener()) {
+            listener.on_unpaired(computer);
+        }
+    }
+
     /// Moves the address that worked to the front, so it's dialed first next time.
     fn reached(&self, peer: DeviceId, address: SocketAddr) {
         let id = peer.to_string();

@@ -46,7 +46,7 @@ The full protocol is in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 | A link from a paired device opening by itself | Nothing opens without a click on its notification. Only `http`/`https` links that are the whole clip; the site is shown first; links with a `user@` part (which hide the real site) and non-ASCII hosts are refused |
 | Clips leaving the local network through the OS | On Windows, received clips are marked so the cloud clipboard doesn't upload them to the Microsoft account (they stay in the local Win+V history unless sensitive) |
 | Oversized or malformed input from a paired device | Frames are limited to 1 MiB, clips to 64 MiB, images are size-checked before decoding; the parsers are fuzzed |
-| A lost or stolen phone, once you unpair it | On the PC: tray menu → the phone → *Forget this device*, or `pasteget forget <name>`. Its connection ends at once and it can't connect again without a new pairing code. The phone can forget a PC the same way |
+| A lost or stolen phone, once you unpair it | On the PC: tray menu → the phone → *Forget this device*, or `pasteget forget <name>`. Its connection ends at once and it can't connect again without a new pairing code; the phone is told and forgets the PC too. The phone can forget a PC the same way |
 
 ## The built-in mode (wireless debugging)
 

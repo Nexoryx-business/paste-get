@@ -117,6 +117,9 @@
         <item quantity="one">Last code, from %1$s at %2$s, sent to %3$d computer</item>
         <item quantity="other">Last code, from %1$s at %2$s, sent to %3$d computers</item>
     </plurals>
+    <string name="unpaired_channel">Unpaired by a computer</string>
+    <string name="unpaired_title">%s unpaired this phone</string>
+    <string name="unpaired_text">It no longer receives your copies. To use it again, pair again from paste-get.</string>
     <string name="copies_channel">Sending copies</string>
     <string name="copies_paused_title">Copies are not sent</string>
     <string name="copies_paused_text">Open paste-get to send what you copy again</string>

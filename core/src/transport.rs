@@ -28,7 +28,7 @@ use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
 use crate::framing::{FrameDecoder, FrameError, encode};
 use crate::identity::{DeviceId, Identity};
 use crate::pairing::sanitize_device_name;
-use crate::proto::{Envelope, Hello, PROTOCOL_VERSION, envelope::Payload};
+use crate::proto::{Envelope, Hello, PROTOCOL_VERSION, Refusal, RefusalReason, envelope::Payload};
 
 /// ALPN protocol name, also the protocol version marker on the wire.
 pub const ALPN: &[u8] = b"pasteget/0";
@@ -54,6 +54,11 @@ pub enum TransportError {
     UnexpectedMessage { expected: &'static str },
     #[error("peer speaks protocol version {0}, this device speaks {PROTOCOL_VERSION}")]
     VersionMismatch(u32),
+    /// The peer doesn't know this device any more: it was unpaired there.
+    #[error("the device unpaired this one")]
+    NotPaired,
+    #[error("the device refused the connection")]
+    Refused,
     #[error("peer closed the connection")]
     Closed,
 }
@@ -145,6 +150,33 @@ impl<S> UnverifiedConnection<S> {
     }
 }
 
+impl<S: AsyncRead + AsyncWrite + Unpin> UnverifiedConnection<S> {
+    /// Tells the peer why it is refused, then closes the connection. Nothing the peer sent is
+    /// acted on: what arrives meanwhile is read and dropped, for at most [`REFUSAL_LINGER`], so
+    /// that closing with unread data doesn't make TCP reset the connection before the peer has
+    /// read the refusal.
+    pub async fn refuse(self, reason: RefusalReason) -> Result<(), TransportError> {
+        let mut connection = self.0;
+        connection
+            .send(&Envelope {
+                payload: Some(Payload::Refusal(Refusal {
+                    reason: reason.into(),
+                })),
+            })
+            .await?;
+        connection.io.inner.shutdown().await?;
+        let mut sink = [0; READ_BUF_LEN];
+        let _ = tokio::time::timeout(REFUSAL_LINGER, async {
+            while matches!(connection.io.inner.read(&mut sink).await, Ok(n) if n > 0) {}
+        })
+        .await;
+        Ok(())
+    }
+}
+
+/// How long a refusing side waits for the peer to hang up.
+pub const REFUSAL_LINGER: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// An authenticated connection to a known device.
 #[derive(Debug)]
 pub struct Connection<S> {
@@ -205,6 +237,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
                 theirs.device_name = sanitize_device_name(&theirs.device_name);
                 Ok(theirs)
             }
+            Some(Envelope {
+                payload: Some(Payload::Refusal(refusal)),
+            }) => Err(match refusal.reason() {
+                RefusalReason::NotPaired => TransportError::NotPaired,
+                RefusalReason::Unspecified => TransportError::Refused,
+            }),
             Some(_) => Err(TransportError::UnexpectedMessage { expected: "Hello" }),
             None => Err(TransportError::Closed),
         }
@@ -618,5 +656,31 @@ mod tests {
 
         let (received, _connection) = tokio::join!(server, client);
         assert_eq!(received.unwrap(), Some(ping(99)));
+    }
+
+    #[tokio::test]
+    async fn an_unpaired_device_is_told_so_over_real_tcp() {
+        let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let server = async {
+            let (socket, _) = listener.accept().await?;
+            accept(socket, &pc)
+                .await?
+                .refuse(RefusalReason::NotPaired)
+                .await
+        };
+        // The phone still trusts the PC: it sends its Hello, which the PC never reads, and gets
+        // the refusal rather than a reset connection.
+        let client = async {
+            let socket = TcpStream::connect(address).await?;
+            let mut connection = connect(socket, &phone, pc.device_id()).await?;
+            connection.exchange_hello(Hello::default()).await
+        };
+
+        let (refused, hello) = tokio::join!(server, client);
+        refused.unwrap();
+        assert!(matches!(hello, Err(TransportError::NotPaired)), "{hello:?}");
     }
 }

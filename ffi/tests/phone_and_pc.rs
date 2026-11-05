@@ -15,7 +15,7 @@ use pasteget_core::identity::Identity;
 use pasteget_desktop::clipboard::{Content, MemoryClipboard, Raw, RgbaImage};
 use pasteget_desktop::config::Profile;
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
-use pasteget_ffi::{ClipDelivery, PastegetError, PhoneClient, PhoneListener};
+use pasteget_ffi::{ClipDelivery, PairedComputer, PastegetError, PhoneClient, PhoneListener};
 
 /// A real 1×1 PNG.
 const PNG_1X1: &[u8] = &[
@@ -43,6 +43,8 @@ struct Recorder {
     /// The `sensitive` flag of each clip in `clips`.
     sensitive: Mutex<Vec<bool>>,
     deliveries: Mutex<Vec<ClipDelivery>>,
+    /// Names of the computers that unpaired the phone.
+    unpaired: Mutex<Vec<String>>,
 }
 
 impl PhoneListener for Recorder {
@@ -57,6 +59,10 @@ impl PhoneListener for Recorder {
 
     fn on_clip_delivered(&self, delivery: ClipDelivery) {
         self.deliveries.lock().unwrap().push(delivery);
+    }
+
+    fn on_unpaired(&self, computer: PairedComputer) {
+        self.unpaired.lock().unwrap().push(computer.name);
     }
 }
 
@@ -258,6 +264,24 @@ fn forgetting_a_computer_disconnects_it() {
         phone.forget(computer.device_id),
         Err(PastegetError::UnknownDevice)
     ));
+}
+
+/// The PC unpairs the phone: the phone hears it on its next dial, forgets the PC and says so.
+#[test]
+fn a_phone_unpaired_on_the_pc_forgets_it_and_says_so() {
+    let pc = start_pc();
+    let phone = connected_phone(&pc, "POCO");
+    let phone_id = phone.client.device_id().parse().unwrap();
+
+    pc.daemon.forget(&phone_id).unwrap();
+
+    wait_until("the phone to hear it was unpaired", || {
+        !phone.listener.unpaired.lock().unwrap().is_empty()
+    });
+    assert_eq!(phone.client.paired_computers(), []);
+    assert_eq!(phone.client.connected_count(), 0);
+    let name = phone.listener.unpaired.lock().unwrap()[0].clone();
+    assert_eq!(name, pc.runtime.block_on(pc.daemon.status()).device_name);
 }
 
 #[test]

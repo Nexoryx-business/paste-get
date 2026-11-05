@@ -73,6 +73,10 @@ pub trait SessionEvents: Send + Sync {
 
     /// `peer` acknowledged a clip this side sent.
     fn clip_delivered(&self, _peer: DeviceId, _delivery: &Delivery) {}
+
+    /// `peer` refused [`keep_connected`] because it unpaired this device, which has then
+    /// stopped dialing it. The place to forget it and tell the user.
+    fn unpaired_by(&self, _peer: DeviceId) {}
 }
 
 /// A clip the device acknowledged.
@@ -310,8 +314,15 @@ pub async fn keep_connected(
                 Ok(Ok(connection)) => {
                     delay = RECONNECT_MIN;
                     events.reached(peer, address);
-                    if let Err(e) = run_session(connection, hello.clone(), peers, events).await {
-                        tracing::info!(%peer, error = %e, "session ended");
+                    match run_session(connection, hello.clone(), peers, events).await {
+                        Ok(()) => {}
+                        // The refusal is genuine: the TLS handshake proved the peer's key.
+                        Err(SessionError::Transport(TransportError::NotPaired)) => {
+                            tracing::info!(%peer, "the device unpaired this one: no longer dialing it");
+                            events.unpaired_by(peer);
+                            return;
+                        }
+                        Err(e) => tracing::info!(%peer, error = %e, "session ended"),
                     }
                     break;
                 }
@@ -364,7 +375,12 @@ async fn read_loop<R: AsyncRead + Unpin>(
             }
             // Pongs only prove the peer is alive; unknown payloads come from newer peers.
             Some(Payload::Pong(_)) | None => continue,
-            Some(Payload::Hello(_) | Payload::PairRequest(_) | Payload::PairResponse(_)) => {
+            Some(
+                Payload::Hello(_)
+                | Payload::PairRequest(_)
+                | Payload::PairResponse(_)
+                | Payload::Refusal(_),
+            ) => {
                 return Err(SessionError::Protocol("handshake message mid-session"));
             }
         };
@@ -507,9 +523,14 @@ mod tests {
         connected: Mutex<Vec<String>>,
         disconnected: Mutex<Vec<DeviceId>>,
         deliveries: Mutex<Vec<(DeviceId, Delivery)>>,
+        unpaired_by: Mutex<Vec<DeviceId>>,
     }
 
     impl SessionEvents for Recorder {
+        fn unpaired_by(&self, peer: DeviceId) {
+            self.unpaired_by.lock().unwrap().push(peer);
+        }
+
         fn connected(&self, _peer: DeviceId, hello: &Hello) {
             self.connected
                 .lock()
@@ -550,6 +571,38 @@ mod tests {
             sleep(Duration::from_millis(5)).await;
         }
         panic!("condition not met in time");
+    }
+
+    #[tokio::test]
+    async fn a_device_that_was_unpaired_stops_dialing_and_says_so() {
+        let (phone, pc) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let (_addresses, watched) = watch::channel(vec![listener.local_addr().unwrap()]);
+        let pc_id = pc.device_id();
+        // The PC no longer knows the phone.
+        let pc_side = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let unverified = transport::accept(socket, &pc).await.unwrap();
+            unverified
+                .refuse(crate::proto::RefusalReason::NotPaired)
+                .await
+                .unwrap();
+        });
+        let events = Recorder::default();
+        let peers = Peers::new();
+
+        timeout(
+            Duration::from_secs(10),
+            keep_connected(&phone, pc_id, watched, &hello("phone"), &peers, &events),
+        )
+        .await
+        .expect("keep_connected should stop");
+
+        pc_side.await.unwrap();
+        assert_eq!(*events.unpaired_by.lock().unwrap(), [pc_id]);
+        assert!(events.connected.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

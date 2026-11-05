@@ -50,10 +50,15 @@ ignored, and the certificate may be regenerated at any time without changing the
   Right after the handshake it looks up the client's device ID:
   - **paired device** → normal session;
   - **pairing window open** → the client must complete pairing (section 5) as its first message;
-  - **otherwise** → close the connection before reading anything.
-- **Unpairing** needs no message: the device that forgets a peer deletes its ID, closes any
-  session with it at once and stops dialing it. The peer, which still trusts it, keeps trying and
-  is refused as above until it is paired again.
+  - **otherwise** → send a `Refusal` with reason `NOT_PAIRED` and close the connection, without
+    acting on anything the client sent. (It reads and discards what arrives for a moment before
+    closing, so that TCP doesn't reset the connection and lose the refusal.)
+- **Unpairing**: the device that forgets a peer deletes its ID, closes any session with it at
+  once and stops dialing it. When the peer, which still trusts it, connects again, it gets the
+  `Refusal` above: it then forgets that device too, stops dialing it and tells the user "<device>
+  unpaired this phone". The refusal can't be forged: the connecting side pinned the refusing
+  side's key during the TLS handshake. A client that doesn't know `Refusal` (an older version)
+  sees an unexpected message and keeps retrying, as before.
 
 In version 0, the PC accepts connections and the phone connects.
 

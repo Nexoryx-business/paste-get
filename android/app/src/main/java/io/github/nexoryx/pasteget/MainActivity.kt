@@ -106,6 +106,13 @@ class MainActivity : ComponentActivity() {
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
                 val lastReceived by ReceivedClips.last.collectAsStateWithLifecycle()
                 val lastCode by OneTimeCodes.last.collectAsStateWithLifecycle()
+                val unpaired by pasteGet.unpaired.collectAsStateWithLifecycle()
+                LaunchedEffect(unpaired) {
+                    unpaired?.let {
+                        computers = pasteGet.client.pairedComputers()
+                        message = getString(R.string.unpaired_title, it.name)
+                    }
+                }
                 val shellReady = builtIn.status == BuiltInStatus.WATCHING || shizuku.status == ShizukuStatus.WATCHING
                 // The built-in mode grants the permission that lets the app hide the notices.
                 LaunchedEffect(builtIn.status) { notices = AccessNotices.of(this@MainActivity) }
@@ -155,6 +162,8 @@ class MainActivity : ComponentActivity() {
     /** Photo access may have changed in the system settings meanwhile. */
     override fun onResume() {
         super.onResume()
+        // A computer may have unpaired this phone meanwhile.
+        computers = pasteGet.client.pairedComputers()
         refreshScreenshots()
         copiesOn = Preferences.sendCopies(this)
         fallback = FallbackAccess.of(this)

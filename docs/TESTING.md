@@ -93,7 +93,7 @@ Watch terminal 2 (the fake phone): each clip it receives logs `clip received …
 | 7 | Stop terminal 2 (Ctrl+C), start it again | Terminal 1 logs `connected` again within ~30 s |
 | 8 | `pasteget pause`, copy some text, then `pasteget --profile phone send "hi"` | Terminal 1 logs `local copy not sent: paused` and `clip dropped: paused`; `Ctrl+V` doesn't paste `hi`. `pasteget resume` brings syncing back |
 | 9 | `pasteget recent` | The last clips, newest first, with where they came from |
-| 10 | Last: `pasteget forget phone` | `Unpaired phone.` Terminal 1 logs `unpaired` and terminal 2 `disconnected`; terminal 2 keeps retrying and terminal 1 refuses it (`not paired`); `pasteget status` lists no device. Pair again (section 2) to go on |
+| 10 | Last: `pasteget forget phone` | `Unpaired phone.` Terminal 1 logs `unpaired`; terminal 2 logs `the device unpaired this one: no longer dialing it` and forgets the PC too (`pasteget --profile phone status` lists no device). Pair again (section 2) to go on |
 
 Screenshot to clipboard:
 - **Windows:** `Win+Shift+S`
@@ -297,7 +297,7 @@ see its log). Keep the fake phone of section 2 running.
 | T10 | With a new profile (`pasteget-tray --profile fresh`), start the tray | The *Pair a phone* window opens by itself with a QR code |
 | T11 | Phone: **Pair a computer**, scan that code | The window shows ✓ "Paired with <phone>" and closes after a few seconds; the tray keeps running and lists the phone as ● |
 | T12 | Menu → *Pair a phone…*, then close the window with its × | The tray keeps running (closing the window doesn't quit) |
-| T13 | Last: menu → the phone → *Forget this device* | The phone disappears from the menu within 2 s and can't reconnect; on the real phone, the computer shows as not connected. Pair again to go on |
+| T13 | Last: menu → the phone → *Forget this device* | The phone disappears from the menu within 2 s and can't reconnect. Within a few seconds the real phone shows "<PC> unpaired this phone" and drops the computer from its list. Pair again to go on |
 
 Report which rows passed on Windows 11, KDE Plasma and Hyprland, and anything that looks wrong
 in the menu (cut-off text, missing ticks, a menu that closes by itself).

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import uniffi.pasteget_ffi.PairedComputer
 import uniffi.pasteget_ffi.PhoneClient
 
 /** Holds the app's single [PhoneClient] and the connection state the UI shows. */
@@ -31,6 +32,15 @@ class PasteGetApp : Application() {
 
     fun clearConnected() {
         connectedIds.value = emptySet()
+    }
+
+    private val unpairedState = MutableStateFlow<PairedComputer?>(null)
+
+    /** The last computer that unpaired this phone, for the home screen to update its list. */
+    val unpaired: StateFlow<PairedComputer?> = unpairedState.asStateFlow()
+
+    fun unpairedBy(computer: PairedComputer) {
+        unpairedState.value = computer
     }
 
     private val lastDeliveryState = MutableStateFlow<LastDelivery?>(null)

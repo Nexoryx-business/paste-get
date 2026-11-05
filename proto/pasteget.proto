@@ -18,7 +18,23 @@ message Envelope {
     Pong pong = 6;
     PairRequest pair_request = 7;
     PairResponse pair_response = 8;
+    Refusal refusal = 9;
   }
+}
+
+// Sent by the accepting device, instead of anything else, to a device it won't talk to; the
+// connection is closed right after. The connecting device has pinned the sender's key, so it
+// knows the refusal is genuine.
+message Refusal {
+  RefusalReason reason = 1;
+}
+
+enum RefusalReason {
+  REFUSAL_REASON_UNSPECIFIED = 0;
+  // The accepting device doesn't know the connecting device: it was unpaired there (or never
+  // paired), and no pairing code is shown. The connecting device should stop dialing it and
+  // tell the user.
+  REFUSAL_REASON_NOT_PAIRED = 1;
 }
 
 // First message from a device that is not paired yet. Only valid while the accepting

@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import uniffi.pasteget_ffi.ClipDelivery
+import uniffi.pasteget_ffi.PairedComputer
 import uniffi.pasteget_ffi.PhoneListener
 
 /**
@@ -48,6 +49,18 @@ class SyncService : Service() {
                     updateFinder()
                 }
             }
+        }
+
+        override fun onUnpaired(computer: PairedComputer) {
+            pasteGet.setConnected(computer.deviceId, false)
+            pasteGet.unpairedBy(computer)
+            main.post {
+                if (running) {
+                    updateNotification()
+                    updateFinder()
+                }
+            }
+            showUnpaired(computer)
         }
 
         override fun onClipReceived(mimeType: String, data: ByteArray, sensitive: Boolean) {
@@ -148,6 +161,33 @@ class SyncService : Service() {
             .build()
     }
 
+    /** "HP-AIO (Windows) unpaired this phone": the computer did it, so the user should know. */
+    private fun showUnpaired(computer: PairedComputer) {
+        val notifications = getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(
+            NotificationChannel(
+                UNPAIRED_CHANNEL_ID,
+                getString(R.string.unpaired_channel),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(this, UNPAIRED_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_tile)
+            .setContentTitle(getString(R.string.unpaired_title, computer.name))
+            .setContentText(getString(R.string.unpaired_text))
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .build()
+        // One per computer.
+        notifications.notify(UNPAIRED_NOTIFICATION_TAG, computer.deviceId.hashCode(), notification)
+    }
+
     /** Searches the network only while a paired computer is missing. */
     private fun updateFinder() {
         val connected = pasteGet.connected.value
@@ -191,6 +231,8 @@ class SyncService : Service() {
     companion object {
         private const val TAG = "paste-get"
         private const val CHANNEL_ID = "connection"
+        private const val UNPAIRED_CHANNEL_ID = "unpaired"
+        private const val UNPAIRED_NOTIFICATION_TAG = "unpaired"
         private const val NOTIFICATION_ID = 1
 
         fun start(context: Context) {

@@ -23,7 +23,7 @@ use pasteget_core::detect;
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, PairingWindow};
-use pasteget_core::proto::{Hello, PROTOCOL_VERSION, Platform};
+use pasteget_core::proto::{Hello, PROTOCOL_VERSION, Platform, RefusalReason};
 use pasteget_core::session::{self, HANDSHAKE_TIMEOUT, Peers, RECONNECT_MIN, SessionEvents};
 use pasteget_core::transport;
 use tokio::net::{TcpListener, TcpStream};
@@ -517,6 +517,28 @@ impl SessionEvents for Shared {
         tracing::info!(id = %peer, "disconnected");
     }
 
+    /// A computer this one joined unpaired it: forget it too. Its dialer is the caller, and
+    /// ends by itself.
+    fn unpaired_by(&self, peer: DeviceId) {
+        let removed = {
+            let mut known = lock(&self.known);
+            let removed = known.remove(&peer);
+            if removed.is_some()
+                && let Err(e) = self.profile.save_known_devices(&known)
+            {
+                tracing::warn!(error = %format!("{e:#}"), "could not save the paired devices");
+            }
+            removed
+        };
+        lock(&self.dialers).remove(&peer);
+        if let Some(device) = removed {
+            tracing::info!(device = %device.name, id = %device.id, "unpaired by the device");
+            if let Some(notifier) = &self.notifier {
+                notifier.notice(format!("{} unpaired this computer", device.name));
+            }
+        }
+    }
+
     fn clip_received(&self, peer: DeviceId, clip: Clip) {
         // A clip that started here and came back through another device: drop it.
         if !lock(&self.guard).accepts_origin(&clip.origin) {
@@ -611,8 +633,18 @@ async fn handle_incoming(shared: Arc<Shared>, socket: TcpStream) -> Result<()> {
     }
 
     let mut slot = shared.pairing.lock().await;
-    let Some(window) = slot.as_mut().filter(|w| w.is_open(Instant::now())) else {
+    if !slot.as_ref().is_some_and(|w| w.is_open(Instant::now())) {
+        drop(slot);
+        // Said, so that a phone unpaired here stops dialing and tells its user.
+        let _ = timeout(
+            HANDSHAKE_TIMEOUT,
+            unverified.refuse(RefusalReason::NotPaired),
+        )
+        .await;
         bail!("refused device {peer}: not paired and no pairing code is shown");
+    }
+    let Some(window) = slot.as_mut() else {
+        bail!("the pairing window just closed");
     };
     let result = timeout(
         PAIRING_REQUEST_TIMEOUT,
@@ -872,10 +904,21 @@ mod tests {
         assert!(pc.daemon.status().await.devices.is_empty());
         assert!(pc.daemon.forget(&laptop.daemon.device_id()).is_err());
 
-        // The laptop still trusts the PC and keeps redialing; the PC refuses it.
-        assert!(wait_for_async(|| async { !connected(&laptop.daemon).await }).await);
-        sleep(Duration::from_millis(300)).await;
-        assert!(!connected(&laptop.daemon).await);
+        // The laptop redials, is told it was unpaired, forgets the PC too and says so.
+        assert!(wait_for_async(|| async { laptop.daemon.status().await.devices.is_empty() }).await);
+        assert!(
+            wait_for(|| {
+                laptop
+                    .notifications
+                    .1
+                    .lock()
+                    .unwrap()
+                    .contains(&"pc unpaired this computer".to_owned())
+            })
+            .await
+        );
+        let known = laptop.daemon.shared.profile.known_devices().unwrap();
+        assert!(!known.contains(&pc.daemon.device_id()));
         laptop.clipboard.set(Raw::Text("after unpairing".into()));
         sleep(Duration::from_millis(100)).await;
         assert_ne!(
