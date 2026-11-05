@@ -143,6 +143,11 @@ abstract class CargoNdkBuild @Inject constructor(private val exec: ExecOperation
         exec.exec {
             workingDir = workspace.get().asFile
             environment("ANDROID_NDK_HOME", ndkDirectory.get())
+            // boring-sys (the wireless debugging client's SPAKE2) generates bindings with bindgen,
+            // which needs the API level in the target; it finds the NDK's sysroot itself.
+            for (triple in listOf("aarch64-linux-android", "x86_64-linux-android")) {
+                environment("BINDGEN_EXTRA_CLANG_ARGS_$triple", "--target=${triple}29")
+            }
             commandLine(
                 listOf("cargo", "ndk") + targets + listOf(
                     "--platform", "29",

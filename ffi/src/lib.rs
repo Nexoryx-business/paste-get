@@ -36,6 +36,9 @@ use tokio::task::JoinHandle;
 
 uniffi::setup_scaffolding!();
 
+#[cfg(not(windows))]
+pub mod wireless_adb;
+
 const IDENTITY_FILE: &str = "identity.key";
 const COMPUTERS_FILE: &str = "computers.json";
 /// Addresses remembered per computer, and found addresses tried per announcement.

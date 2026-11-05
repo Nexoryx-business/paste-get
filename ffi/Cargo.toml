@@ -22,6 +22,18 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
 uniffi = "0.32"
 
+# The built-in shell mode: a small ADB client for the phone's own wireless debugging
+# (src/wireless_adb). Same TLS and AES/HKDF crates as the core; SPAKE2 from BoringSSL.
+if-addrs = "0.15"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+
+# BoringSSL builds with CMake and Clang: Android and the Linux CI have them. The module isn't
+# needed, nor built, on Windows hosts.
+[target.'cfg(not(windows))'.dependencies]
+boring-sys = "5"
+
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 pasteget-desktop = { path = "../desktop" }
