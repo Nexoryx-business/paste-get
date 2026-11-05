@@ -19,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 use pasteget_core::clip::{Clip, mime};
+use pasteget_core::detect;
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, PairingWindow};
@@ -115,6 +116,7 @@ struct Shared {
     clipboard: ClipboardWatcher,
     notifier: Option<Arc<dyn Notifier>>,
     notify_for: NotifyFor,
+    offer_to_open_links: bool,
     paused: AtomicBool,
     recent: Mutex<RecentClips>,
     events: broadcast::Sender<Event>,
@@ -155,6 +157,7 @@ impl Daemon {
             clipboard,
             notifier: options.notifier,
             notify_for: settings.notify,
+            offer_to_open_links: settings.offer_to_open_links,
             paused: AtomicBool::new(false),
             recent: Mutex::new(RecentClips::default()),
             events,
@@ -528,16 +531,25 @@ impl SessionEvents for Shared {
             image: clip.mime_type != mime::TEXT,
             from: self.name_of(&peer),
         };
+        // A link gets a notification of its own, which opens it when clicked.
+        let link = clip
+            .as_text()
+            .filter(|_| {
+                self.offer_to_open_links && self.notify_for != NotifyFor::Off && !clip.sensitive
+            })
+            .and_then(detect::link);
         // Sensitive clips stay as quiet as possible.
         let notifier = self
             .notifier
             .clone()
-            .filter(|_| !clip.sensitive && received.wanted_by(self.notify_for));
+            .filter(|_| !clip.sensitive && (link.is_some() || received.wanted_by(self.notify_for)));
         let (mime_type, len) = (clip.mime_type.clone(), clip.data.len());
         let applied = move |took: Duration| {
             tracing::info!(%mime_type, len, ms = took.as_millis(), "clip applied to the clipboard");
-            if let Some(notifier) = notifier {
-                notifier.received(received);
+            match (notifier, link) {
+                (Some(notifier), Some(link)) => notifier.link(received.from, link),
+                (Some(notifier), None) => notifier.received(received),
+                (None, _) => {}
             }
         };
         let content = Content {
@@ -680,7 +692,11 @@ mod tests {
     }
 
     #[derive(Debug, Default)]
-    struct Notifications(Mutex<Vec<Received>>, Mutex<Vec<String>>);
+    struct Notifications(
+        Mutex<Vec<Received>>,
+        Mutex<Vec<String>>,
+        Mutex<Vec<(String, detect::Link)>>,
+    );
 
     impl Notifier for Notifications {
         fn received(&self, received: Received) {
@@ -689,6 +705,10 @@ mod tests {
 
         fn notice(&self, summary: String) {
             self.1.lock().unwrap().push(summary);
+        }
+
+        fn link(&self, from: String, link: detect::Link) {
+            self.2.lock().unwrap().push((from, link));
         }
     }
 
@@ -774,6 +794,41 @@ mod tests {
             }]
         );
         assert!(pc.notifications.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_link_from_another_device_is_offered_to_open() {
+        let pc = start("pc").await;
+        let laptop = start("laptop").await;
+        let invite = pc.daemon.open_pairing().await.unwrap();
+        laptop.daemon.join(&invite).await.unwrap();
+        assert!(wait_for_async(|| connected(&pc.daemon)).await);
+
+        laptop
+            .clipboard
+            .set(Raw::Text("https://example.com/article?id=7".into()));
+        assert!(wait_for(|| !pc.notifications.2.lock().unwrap().is_empty()).await);
+        let (from, link) = pc.notifications.2.lock().unwrap()[0].clone();
+        assert_eq!(from, "laptop");
+        assert_eq!(link.host, "example.com");
+        assert_eq!(link.url, "https://example.com/article?id=7");
+        // Instead of the plain notification, which text doesn't get by default anyway.
+        assert!(pc.notifications.0.lock().unwrap().is_empty());
+
+        // Text with a link in it is just text.
+        laptop
+            .clipboard
+            .set(Raw::Text("read https://example.org later".into()));
+        assert!(
+            wait_for(
+                || pc.clipboard.get() == Some(Raw::Text("read https://example.org later".into()))
+            )
+            .await
+        );
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(pc.notifications.2.lock().unwrap().len(), 1);
+        // The laptop, where it was copied, offers nothing.
+        assert!(laptop.notifications.2.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

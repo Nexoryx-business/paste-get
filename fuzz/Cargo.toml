@@ -51,3 +51,10 @@ path = "fuzz_targets/adb_wire.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "detect"
+path = "fuzz_targets/detect.rs"
+test = false
+doc = false
+bench = false

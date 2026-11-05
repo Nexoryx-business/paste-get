@@ -106,7 +106,7 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] `SECURITY.md` draft: threat model, known gaps, private reporting
 - [ ] README demo GIF: needs the real devices; how to record it is in `RELEASING.md`
 - [ ] Human review of crypto and protocol code: `docs/REVIEW.md` lists the files and the
-  27 properties to check
+  28 properties to check
 - [x] Pairing from the tray: a *Pair a phone* window with the QR code, opened by itself on the
   first start, so no terminal is needed
 - [x] PC side can revoke a paired phone: `pasteget forget <name>`, or the tray menu → the phone
@@ -116,6 +116,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 
 ## v0.2 — "smart"
 History + search, 2FA codes, PC-side OCR, sensitive filters, auto-crop, smart actions.
+- [x] A link copied on another device: the PC shows "Link from <phone>: <site>", which opens it
+  when clicked (`TESTING.md`, section 13; `offer_to_open_links` in `settings.toml`)
 Desktop identity key in the OS keystore when one is available (M2 stores it in a user-only file,
 like SSH keys, because Hyprland setups often run no Secret Service).
 

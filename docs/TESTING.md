@@ -186,7 +186,8 @@ Report the five values per OS, and whether S1 felt instant.
 
 Notifications are set in `settings.toml`, in `%APPDATA%\paste-get\default\` on Windows and
 `~/.config/paste-get/default/` on Linux: `notify = "images"` (the default), `"all"` (text too) or
-`"off"`. Restart the daemon after a change.
+`"off"`. `offer_to_open_links = false` turns off the notification for links (section 13).
+Restart the daemon after a change.
 
 ## 7. From the PC to the phone (M6)
 
@@ -405,6 +406,23 @@ If Shizuku was set up, the built-in mode replaces it; you can uninstall Shizuku.
 
 If a step fails, the card shows why. **Please report that text**, and, if you can, the log:
 `adb logcat -s paste-get` (lines start with "built-in mode" or "shell helper").
+
+## 13. Links (v0.2)
+
+When the PC receives a text that is nothing but a web link, it shows "Link from <phone>:
+<site>" instead of staying quiet. Clicking it (or its **Open** button) opens the link in the
+default browser. Nothing opens without a click.
+
+| # | Do this | Expected |
+|---|---|---|
+| L1 | On the phone, copy a link (Chrome: long-press the address bar → Copy) | Within a second, the PC shows "Link from <phone>: <site>". The link is on the PC's clipboard too |
+| L2 | Click the notification | The link opens in the default browser |
+| L3 | Copy a link again, click **Open** (Windows: in the toast; KDE: under the notification) | Opens too |
+| L4 | Copy a sentence with a link inside it | No link notification (it's just text) |
+| L5 | Set `offer_to_open_links = false`, restart, repeat L1 | No notification; the link is still on the clipboard |
+
+Report whether the click works on Windows 11, KDE Plasma and your Hyprland notification daemon
+(mako, dunst, swaync: some need a setting or a keybinding to invoke an action).
 
 ## Known limitations
 

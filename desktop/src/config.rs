@@ -5,7 +5,7 @@
 //! ```text
 //! <config dir>/paste-get/<profile>/
 //!   identity.key    Ed25519 private key (PKCS#8 DER). Readable by the user only.
-//!   settings.toml   Device name, port, notifications, hotkeys. Created with defaults, safe
+//!   settings.toml   Device name, port, notifications, links, hotkeys. Created with defaults, safe
 //!                   to edit.
 //!   devices.toml    Paired devices.
 //! ```
@@ -150,6 +150,8 @@ pub struct Settings {
     pub port: u16,
     /// Which received clips show a notification.
     pub notify: NotifyFor,
+    /// A link copied on another device shows a notification that opens it when clicked.
+    pub offer_to_open_links: bool,
     /// Global hotkeys. Must stay last: TOML puts tables after plain keys.
     pub hotkeys: HotkeySettings,
 }
@@ -179,6 +181,7 @@ impl Default for Settings {
             device_name: sanitize_device_name(&format!("{host} ({os})")),
             port: DEFAULT_PORT,
             notify: NotifyFor::default(),
+            offer_to_open_links: true,
             hotkeys: HotkeySettings::default(),
         }
     }

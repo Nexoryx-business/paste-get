@@ -20,6 +20,7 @@ make trust decisions. In order of risk:
 | `core/src/clip.rs` | Clip offer/chunks/ack: sizes, offsets, hash check, reassembly | ~510 |
 | `core/src/framing.rs` | Length-prefixed frames, 1 MiB limit | ~190 |
 | `core/src/echo.rs` | Echo-loop guard (not a security boundary, but it hashes untrusted data) | ~120 |
+| `core/src/detect.rs` | Finds a link to offer to open in untrusted text | ~200 |
 | `desktop/src/daemon.rs` | `handle_incoming`: known device → session, unknown → pairing only while a window is open | part |
 | `desktop/src/control.rs` | Local control channel: Unix socket in a 0700 directory, Windows named pipe | ~550 |
 | `desktop/src/config.rs` | Key file permissions (0600), profile names (path traversal) | part |
@@ -109,6 +110,13 @@ Each line is a claim to check. "→" points at where it's enforced.
     it grants itself is used for `adb_wifi_enabled` and, only when the user turns the switch on,
     `clipboard_show_access_notifications`. → `BuiltInShell`, `AccessNotices`
 
+### Smart features (v0.2)
+28. A link from a paired device opens only when the user clicks its notification, and only
+    `http`/`https` links that are the whole clip. The site shown is the one the browser will
+    open (no userinfo, ASCII host). The URL reaches the browser without a shell or command line
+    in between (`xdg-open` with one argument, `ShellExecuteW`). → `core/src/detect.rs` (fuzz
+    target `detect`), `desktop/src/notify.rs`
+
 ## Known gaps (not bugs to report, but worth an opinion)
 
 - The identity key is a file, not in the OS keystore (v0.2).
@@ -119,7 +127,7 @@ Each line is a claim to check. "→" points at where it's enforced.
 
 ```sh
 cargo test --workspace                       # includes two-daemon and phone-API end-to-end tests
-cd fuzz && cargo +nightly fuzz run <target>  # frame_decoder, pairing_invite, clip_receiver, hotkey
+cd fuzz && cargo +nightly fuzz run <target>  # frame_decoder, pairing_invite, clip_receiver, hotkey, adb_wire, detect
 cargo deny check                             # dependency advisories and licenses
 ```
 
