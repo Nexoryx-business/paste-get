@@ -35,6 +35,15 @@ class ShellClipboardService(private val context: Context?) : IShellClipboard.Stu
     private var appListener: IClipboardChanged? = null
     private var registered = false
 
+    /** Called when the app's process goes away. The built-in mode's helper ends then. */
+    @Volatile
+    var onAppGone: (() -> Unit)? = null
+
+    /** Whether the app has started watching. */
+    @Volatile
+    var watched = false
+        private set
+
     override fun destroy() {
         exitProcess(0)
     }
@@ -42,6 +51,12 @@ class ShellClipboardService(private val context: Context?) : IShellClipboard.Stu
     @Synchronized
     override fun watch(listener: IClipboardChanged, userId: Int): String = carried {
         appListener = listener
+        try {
+            listener.asBinder().linkToDeath({ onAppGone?.invoke() }, 0)
+        } catch (e: RemoteException) {
+            onAppGone?.invoke() // Gone already.
+        }
+        watched = true
         if (!registered) {
             val type = listenerType()
             clipboard.call(ADD_LISTENER, userId, changeListener(type), type)

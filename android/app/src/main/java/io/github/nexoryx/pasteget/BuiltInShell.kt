@@ -15,6 +15,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
@@ -64,7 +65,8 @@ data class BuiltInState(val status: BuiltInStatus, val detail: String? = null)
  *    wireless debugging on and off (`WRITE_SECURE_SETTINGS`).
  * 2. Whenever the automatic copy starts (also after a reboot, on Wi-Fi): the app switches
  *    wireless debugging on, starts [ShellHelper] as the shell user through it, and switches it
- *    back off. The helper then reports copies over [ShellLinkServer].
+ *    back off. The helper hands the app its binder ([ShellBinderProvider], [helperArrived]): the
+ *    same [IShellClipboard] Shizuku runs for mode A.
  *
  * Only the phone itself is ever reached (the Rust client refuses other addresses).
  */
@@ -86,42 +88,84 @@ class BuiltInShell(
     @Volatile
     private var active = false
 
-    /** Only touched on [worker]. */
-    private var link: ShellLinkServer? = null
+    /** The running helper, once it handed over its binder. */
+    @Volatile
+    private var helper: IShellClipboard? = null
+    private val build: Long by lazy { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime }
     private var restarts = 0
     private var restartsSince = 0L
 
     val isSetUp: Boolean
         get() = Preferences.builtInPaired(context) && AdbKey.exists(context.filesDir)
 
-    private val events = object : ShellLinkServer.Events {
-        override fun watching(how: String) {
+    private val changed = object : IClipboardChanged.Stub() {
+        override fun changed() {
+            worker.execute(::readNewCopy)
+        }
+    }
+
+    /**
+     * The helper handed over its binder ([ShellBinderProvider], on a binder thread). Refused if
+     * this mode isn't running or the helper comes from another build of the app.
+     */
+    fun helperArrived(binder: IBinder, build: Long): Boolean {
+        if (!active || !isSetUp || build != this.build) return false
+        val arrived = IShellClipboard.Stub.asInterface(binder)
+        val previous = helper
+        helper = arrived
+        if (previous != null && previous.asBinder() != binder) worker.execute { runCatching { previous.destroy() } }
+        try {
+            binder.linkToDeath({ helperDied(arrived) }, 0)
+        } catch (e: android.os.RemoteException) {
+            helperDied(arrived)
+            return false
+        }
+        worker.execute { watch(arrived) }
+        return true
+    }
+
+    private fun watch(arrived: IShellClipboard) {
+        try {
+            val how = arrived.watch(changed, userId)
             Log.i(TAG, "built-in mode: watching the clipboard as shell with $how")
             set(BuiltInStatus.WATCHING)
+        } catch (e: Exception) {
+            // Unknown hidden API on this phone, or the helper died meanwhile.
+            Log.w(TAG, "built-in mode: the helper can't watch the clipboard: $e")
+            set(BuiltInStatus.FAILED, e.message ?: e.javaClass.simpleName)
         }
+    }
 
-        override fun copied(copy: CopiedText) = onCopied(copy)
-
-        override fun failed(reason: String) {
-            Log.w(TAG, "built-in mode: the helper can't watch the clipboard: $reason")
-            set(BuiltInStatus.FAILED, reason)
+    private fun helperDied(gone: IShellClipboard) {
+        if (helper !== gone) return
+        helper = null
+        if (!active) return
+        Log.i(TAG, "built-in mode: the helper stopped")
+        // Android may have ended it: start another, but not in a loop.
+        val now = SystemClock.elapsedRealtime()
+        if (now - restartsSince > RESTART_WINDOW_MS) {
+            restartsSince = now
+            restarts = 0
         }
+        if (++restarts <= MAX_RESTARTS) {
+            set(BuiltInStatus.STARTING)
+            worker.execute { launch() }
+        } else {
+            set(BuiltInStatus.FAILED, "the shell helper keeps stopping")
+        }
+    }
 
-        override fun disconnected() {
-            if (!active) return
-            Log.i(TAG, "built-in mode: the helper stopped")
-            // Android may have ended it: start another, but not in a loop.
-            val now = SystemClock.elapsedRealtime()
-            if (now - restartsSince > RESTART_WINDOW_MS) {
-                restartsSince = now
-                restarts = 0
-            }
-            if (++restarts <= MAX_RESTARTS) {
-                set(BuiltInStatus.STARTING)
-                worker.execute { launch() }
-            } else {
-                set(BuiltInStatus.FAILED, "the shell helper keeps stopping")
-            }
+    /** Never logs the clip: [onCopied] logs its size only. */
+    private fun readNewCopy() {
+        val running = helper ?: return
+        try {
+            // A description first: reading it doesn't make Android say the clipboard was read.
+            val description = running.describe(userId) ?: return
+            if (!CopiedText.worthReading(description)) return
+            val copy = running.read(userId)?.let(CopiedText::of) ?: return
+            onCopied(copy)
+        } catch (e: Exception) {
+            Log.w(TAG, "built-in mode: copy not read: ${e.javaClass.simpleName}")
         }
     }
 
@@ -150,15 +194,7 @@ class BuiltInShell(
             wifi,
         )
         set(BuiltInStatus.STARTING)
-        worker.execute {
-            try {
-                ensureLink()
-            } catch (e: java.io.IOException) {
-                set(BuiltInStatus.FAILED, "local socket: ${e.message}")
-                return@execute
-            }
-            launch()
-        }
+        worker.execute { launch() }
     }
 
     /** On the main thread. Also ends the helper. */
@@ -166,10 +202,10 @@ class BuiltInShell(
         if (!active) return
         active = false
         runCatching { connectivity.unregisterNetworkCallback(wifi) }
-        worker.execute {
-            link?.stop()
-            link = null
-        }
+        val running = helper
+        helper = null
+        // It ends at once, so the call fails: that's expected.
+        worker.execute { runCatching { running?.destroy() } }
         if (mutableState.value.status != BuiltInStatus.PAIRING) set(BuiltInStatus.OFF)
     }
 
@@ -263,21 +299,9 @@ class BuiltInShell(
         set(BuiltInStatus.PAIRING, reason)
     }
 
-    private fun ensureLink(): ShellLinkServer {
-        link?.let { return it }
-        val build = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-        val server = ShellLinkServer("pasteget.shell.${Process.myUid()}", build, userId, events)
-        server.start()
-        link = server
-        return server
-    }
-
     /** Starts the helper, unless one is already there. On the worker thread. */
     private fun launch() {
-        if (!active || !isSetUp) return
-        val server = link ?: return
-        // A helper from before (the app was restarted) reconnects within a few seconds.
-        if (waitFor(HELPER_RETURN_MS) { server.connected }) return
+        if (!active || !isSetUp || helper != null) return
         if (!onWifi()) return set(BuiltInStatus.NEEDS_WIFI)
         set(BuiltInStatus.STARTING)
         val switchedOn = !debuggingOn()
@@ -291,13 +315,20 @@ class BuiltInShell(
                 ?: return set(BuiltInStatus.FAILED, context.getString(R.string.builtin_debugging_not_found))
             val command = ShellCommands.helperLaunch(
                 context.applicationInfo.sourceDir,
-                server.socketName,
-                Process.myUid(),
-                context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime,
+                ShellBinderProvider.authority(context.packageName),
+                userId,
+                build,
+                context.packageName,
             )
             onHosts(connect) { host -> adbExec(host, connect.port.toUShort(), key.pkcs8, command) }
-            if (!waitFor(HELPER_START_MS) { server.connected }) {
-                set(BuiltInStatus.FAILED, context.getString(R.string.builtin_helper_silent))
+            if (!waitFor(HELPER_START_MS) { helper != null }) {
+                // What the helper said before it ended, if anything: the best clue there is.
+                val lastWords = runCatching {
+                    onHosts(connect) { host -> adbExec(host, connect.port.toUShort(), key.pkcs8, ShellCommands.helperLogTail()) }
+                }.getOrNull()?.trim()?.lines()?.lastOrNull { it.isNotBlank() }
+                Log.w(TAG, "built-in mode: the helper didn't start: ${lastWords ?: "(no output)"}")
+                val reason = context.getString(R.string.builtin_helper_silent)
+                set(BuiltInStatus.FAILED, if (lastWords.isNullOrEmpty()) reason else "$reason ($lastWords)")
             }
         } catch (e: AdbException.NotAuthorized) {
             set(BuiltInStatus.FAILED, context.getString(R.string.builtin_not_authorized))
@@ -409,7 +440,6 @@ class BuiltInShell(
 
         /** How long "Set up" looks for wireless debugging before asking for a code. */
         const val PROBE_TIMEOUT_MS = 4_000L
-        const val HELPER_RETURN_MS = 4_000L
         const val HELPER_START_MS = 10_000L
         const val POLL_MS = 200L
         const val MAX_RESTARTS = 5

@@ -25,13 +25,22 @@ object ShellCommands {
      * and leaves it running after the adb connection closes: in a session of its own (`setsid`,
      * or `nohup` where there is no `setsid`), with no terminal.
      */
-    fun helperLaunch(apk: String, socket: String, appUid: Int, build: Long): String {
+    fun helperLaunch(apk: String, authority: String, userId: Int, build: Long, appPackage: String): String {
         val helper = "app_process /system/bin --nice-name=pasteget_shell ${ShellHelper::class.java.name} " +
-            "${quote(socket)} $appUid $build"
+            "${quote(authority)} $userId $build ${quote(appPackage)}"
         val classpath = "CLASSPATH=${quote(apk)}"
         return "if command -v setsid >/dev/null 2>&1; then $classpath setsid $helper; " +
-            "else $classpath nohup $helper; fi </dev/null >/dev/null 2>&1 &"
+            "else $classpath nohup $helper; fi </dev/null >$HELPER_LOG 2>&1 &"
     }
+
+    /**
+     * Where the helper writes what goes wrong, for the app to show ([helperLogTail]): never
+     * clipboard contents. Shell may write there; apps can't, nor read it.
+     */
+    const val HELPER_LOG = "/data/local/tmp/pasteget-helper.log"
+
+    /** The helper's last words, read back through wireless debugging when it didn't start. */
+    fun helperLogTail(): String = "tail -n 3 $HELPER_LOG 2>/dev/null"
 
     /** Lets the app turn wireless debugging on by itself after a restart of the phone. */
     fun grantSecureSettings(app: String): String = "pm grant ${quote(app)} android.permission.WRITE_SECURE_SETTINGS"

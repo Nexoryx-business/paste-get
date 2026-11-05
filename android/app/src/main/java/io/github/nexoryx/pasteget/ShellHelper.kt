@@ -2,140 +2,134 @@
 
 package io.github.nexoryx.pasteget
 
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
+import android.annotation.SuppressLint
+import android.content.AttributionSource
+import android.os.Binder
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.Keep
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.io.IOException
-import java.util.concurrent.Executors
 import kotlin.system.exitProcess
 
 /**
- * The built-in mode's shell process: what Shizuku's service does for mode A, started by the app
- * itself through wireless debugging ([BuiltInShell]), with
- * `app_process /system/bin io.github.nexoryx.pasteget.ShellHelper <socket> <app uid> <build>`.
+ * The built-in mode's shell process: Shizuku's part in mode A, started by the app itself through
+ * wireless debugging ([BuiltInShell]), with
+ * `app_process /system/bin io.github.nexoryx.pasteget.ShellHelper <authority> <user> <build> <package>`.
  *
- * Like [ShellClipboardService], which it uses, it runs as the shell user, with none of the app
- * around it. It connects to the app's local socket ([ShellLinkServer]) and only talks to it if
- * the socket belongs to the app's UID, so another app can't pose as paste-get to get the copies.
- * If the app goes away (Android may stop it), it keeps trying to reach it for a while, then ends.
+ * It runs [ShellClipboardService], the same service Shizuku runs, and hands its binder to the
+ * app through the app's [ShellBinderProvider], as Shizuku's server does ([HiddenProviders]):
+ * Android's SELinux rules don't let the shell connect to an app's local socket, but allow binder
+ * calls. It ends when the app goes away (Android may stop it), when the app asks
+ * ([IShellClipboard.destroy]), or if the app doesn't take it.
  */
 @Keep
 object ShellHelper {
     private const val TAG = "paste-get"
-    private const val RETRY_MS = 3_000L
+    private const val ATTEMPTS = 5
+    private const val RETRY_MS = 2_000L
 
-    /** How long it waits for the app to come back before ending. */
-    private const val GIVE_UP_MS = 30 * 60 * 1000L
+    /** Time the app has to start watching once it took the binder. */
+    private const val WATCH_TIMEOUT_MS = 60_000L
 
     @JvmStatic
     fun main(args: Array<String>) {
-        val socketName = args.getOrNull(0)
-        val appUid = args.getOrNull(1)?.toIntOrNull()
+        val authority = args.getOrNull(0)
+        val userId = args.getOrNull(1)?.toIntOrNull()
         val build = args.getOrNull(2)?.toLongOrNull()
-        if (socketName == null || appUid == null || build == null) {
-            System.err.println("usage: ShellHelper <socket> <app uid> <build>")
+        val appPackage = args.getOrNull(3)
+        if (authority == null || userId == null || build == null || appPackage == null) {
+            System.err.println("usage: ShellHelper <authority> <user> <build> <package>")
             exitProcess(2)
         }
-        Log.i(TAG, "shell helper started as uid ${Process.myUid()}")
-        Helper(socketName, appUid, build).run()
-    }
-
-    private class Helper(private val socketName: String, private val appUid: Int, private val build: Long) {
-        private val clipboard = ShellClipboardService(null)
-        private val reader = Executors.newSingleThreadExecutor()
-
-        @Volatile
-        private var out: DataOutputStream? = null
-        private var userId = 0
-
-        private val changed = object : IClipboardChanged.Stub() {
-            override fun changed() {
-                reader.execute(::readNewCopy)
-            }
+        // Uncaught errors go to the log file the app reads back ([ShellCommands.HELPER_LOG]).
+        val existing = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            say("shell helper crashed: $e at ${e.stackTrace.take(3).joinToString(" < ")}")
+            existing?.uncaughtException(thread, e) ?: exitProcess(1)
         }
-
-        /** When the app was last there. */
-        private var lastConnected = SystemClock.elapsedRealtime()
-
-        fun run() {
-            while (SystemClock.elapsedRealtime() - lastConnected < GIVE_UP_MS) {
-                try {
-                    serve()
-                } catch (e: IOException) {
-                    Log.i(TAG, "shell helper: app not reachable (${e.message})")
-                }
-                out = null
-                SystemClock.sleep(RETRY_MS)
-            }
-            Log.i(TAG, "shell helper: the app didn't come back, ending")
+        say("shell helper started as uid ${Process.myUid()}")
+        Looper.prepareMainLooper()
+        val service = ShellClipboardService(null)
+        // Nothing to do once the app is gone: Android may have stopped it; it starts a new helper.
+        service.onAppGone = {
+            say("shell helper: the app went away, ending")
             exitProcess(0)
         }
-
-        /** One connection to the app, until it closes. */
-        private fun serve() {
-            LocalSocket().use { socket ->
-                socket.connect(LocalSocketAddress(socketName, LocalSocketAddress.Namespace.ABSTRACT))
-                val owner = socket.peerCredentials.uid
-                if (owner != appUid) throw IOException("the socket belongs to uid $owner, not the app")
-                val output = DataOutputStream(socket.outputStream.buffered())
-                val input = DataInputStream(socket.inputStream.buffered())
-                synchronized(this) { ShellLink.write(output, ShellLink.FromHelper.Hello(ShellLink.VERSION, build)) }
-                out = output
-                try {
-                    while (true) {
-                        when (val message = ShellLink.readToHelper(input)) {
-                            is ShellLink.ToHelper.Watch -> watch(message.userId)
-                            ShellLink.ToHelper.Exit -> {
-                                Log.i(TAG, "shell helper: the app asked it to end")
-                                exitProcess(0)
-                            }
-                        }
+        repeat(ATTEMPTS) {
+            if (handOver(service, authority, userId, build, appPackage)) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!service.watched) {
+                        say("shell helper: the app didn't start watching, ending")
+                        exitProcess(0)
                     }
-                } finally {
-                    // The wait for the app to come back starts now.
-                    lastConnected = SystemClock.elapsedRealtime()
-                }
+                }, WATCH_TIMEOUT_MS)
+                // Binder threads serve the app from now on.
+                Looper.loop()
             }
+            SystemClock.sleep(RETRY_MS)
         }
+        say("shell helper: the app didn't take the helper, ending")
+        exitProcess(1)
+    }
 
-        private fun watch(user: Int) {
-            userId = user
-            val reply = try {
-                ShellLink.FromHelper.Watching(clipboard.watch(changed, user))
-            } catch (e: RuntimeException) {
-                // Unknown hidden API on this phone: the app falls back to another mode.
-                ShellLink.FromHelper.Failed(e.message ?: e.javaClass.simpleName)
+    private fun handOver(
+        service: ShellClipboardService,
+        authority: String,
+        userId: Int,
+        build: Long,
+        appPackage: String,
+    ): Boolean {
+        val callingPackage = if (Process.myUid() == 0) "root" else "com.android.shell"
+        return try {
+            val providers = HiddenProviders(activityManager()) { attributionSource(callingPackage) }
+            val extras = Bundle().apply { putBinder(ShellBinderProvider.EXTRA_BINDER, service) }
+            val reply = providers.call(
+                authority,
+                userId,
+                Binder(),
+                callingPackage,
+                ShellBinderProvider.METHOD_HELPER,
+                build.toString(),
+                extras,
+            )
+            // Only the app it was started for: the provider's owner must be that package.
+            if (reply.packageName != null && reply.packageName != appPackage) {
+                say("shell helper: $authority belongs to ${reply.packageName}, not $appPackage")
+                exitProcess(1)
             }
-            send(reply)
-        }
-
-        /** Never logs the clip: the app does, with its size only. */
-        private fun readNewCopy() {
-            try {
-                // A description first: reading it doesn't make Android say the clipboard was read.
-                val description = clipboard.describe(userId) ?: return
-                if (!CopiedText.worthReading(description)) return
-                val copy = clipboard.read(userId)?.let(CopiedText::of) ?: return
-                if (copy.text.length > ShellLink.MAX_TEXT_BYTES / 4) return
-                send(ShellLink.FromHelper.Copy(copy))
-            } catch (e: RuntimeException) {
-                Log.w(TAG, "shell helper: copy not read: ${e.javaClass.simpleName}")
-            }
-        }
-
-        private fun send(message: ShellLink.FromHelper) {
-            val output = out ?: return
-            try {
-                synchronized(this) { ShellLink.write(output, message) }
-            } catch (e: IOException) {
-                // The connection broke: serve() notices and reconnects.
-                Log.i(TAG, "shell helper: could not reach the app: ${e.message}")
-            }
+            val accepted = (reply.result as? Bundle)?.getBoolean(ShellBinderProvider.EXTRA_ACCEPTED) == true
+            if (!accepted) say("shell helper: the app didn't take it (another build, or not ready)")
+            accepted
+        } catch (e: Exception) {
+            say("shell helper: could not reach the app: $e")
+            false
+        } catch (e: LinkageError) {
+            say("shell helper: could not reach the app: $e")
+            false
         }
     }
+
+    /** To the system log and to the helper's own log file. Never clipboard contents. */
+    private fun say(message: String) {
+        Log.i(TAG, message)
+        System.err.println(message)
+    }
+
+    /** The hidden `IActivityManager`. Allowed here: this isn't an app process. */
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    private fun activityManager(): Any =
+        Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null)
+            ?: throw IllegalStateException("no activity manager")
+
+    /** Only called on Android 12+, where `IContentProvider.call` takes one. */
+    private fun attributionSource(callingPackage: String): Any =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AttributionSource.Builder(Process.myUid()).setPackageName(callingPackage).build()
+        } else {
+            throw UnsupportedOperationException("AttributionSource needs Android 12")
+        }
 }

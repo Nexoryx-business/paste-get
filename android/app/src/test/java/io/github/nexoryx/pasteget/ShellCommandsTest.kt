@@ -47,19 +47,18 @@ class ShellCommandsTest {
     fun theHelperIsStartedFromTheApkInItsOwnSession() {
         val command = ShellCommands.helperLaunch(
             "/data/app/~~a1==/io.github.nexoryx.pasteget-b2==/base.apk",
-            "pasteget.shell.10234",
-            10234,
+            "io.github.nexoryx.pasteget.shell",
+            0,
             1_700_000_000_000,
+            "io.github.nexoryx.pasteget",
         )
 
+        val helper = "app_process /system/bin --nice-name=pasteget_shell io.github.nexoryx.pasteget.ShellHelper " +
+            "'io.github.nexoryx.pasteget.shell' 0 1700000000000 'io.github.nexoryx.pasteget'"
+        val classpath = "CLASSPATH='/data/app/~~a1==/io.github.nexoryx.pasteget-b2==/base.apk'"
         assertEquals(
-            "if command -v setsid >/dev/null 2>&1; then " +
-                "CLASSPATH='/data/app/~~a1==/io.github.nexoryx.pasteget-b2==/base.apk' setsid " +
-                "app_process /system/bin --nice-name=pasteget_shell io.github.nexoryx.pasteget.ShellHelper " +
-                "'pasteget.shell.10234' 10234 1700000000000; " +
-                "else CLASSPATH='/data/app/~~a1==/io.github.nexoryx.pasteget-b2==/base.apk' nohup " +
-                "app_process /system/bin --nice-name=pasteget_shell io.github.nexoryx.pasteget.ShellHelper " +
-                "'pasteget.shell.10234' 10234 1700000000000; fi </dev/null >/dev/null 2>&1 &",
+            "if command -v setsid >/dev/null 2>&1; then $classpath setsid $helper; " +
+                "else $classpath nohup $helper; fi </dev/null >/data/local/tmp/pasteget-helper.log 2>&1 &",
             command,
         )
     }

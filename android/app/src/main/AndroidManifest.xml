@@ -139,6 +139,14 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <!-- Where the built-in mode's shell helper hands its binder to the app. Only the shell
+             user (or root) holds this permission; the provider also checks the caller's UID. -->
+        <provider
+            android:name=".ShellBinderProvider"
+            android:authorities="${applicationId}.shell"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <!-- The code typed in the built-in mode's pairing notification. -->
         <receiver
             android:name=".BuiltInShell$PairingCodeReceiver"

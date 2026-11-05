@@ -25,7 +25,7 @@ make trust decisions. In order of risk:
 | `desktop/src/config.rs` | Key file permissions (0600), profile names (path traversal) | part |
 | `ffi/src/lib.rs` | The same decisions on the phone side, through the core | part |
 | `ffi/src/wireless_adb/` | ADB client for the phone's own wireless debugging: pairing (TLS 1.3 + BoringSSL SPAKE2 + AES-GCM), `exec:` over TLS | ~700 |
-| `android/…/ShellHelper.kt`, `ShellLinkServer.kt`, `BuiltInShell.kt` | The shell helper the app starts through it, and the local socket between them | ~600 |
+| `android/…/ShellHelper.kt`, `ShellBinderProvider.kt`, `HiddenProviders.kt`, `BuiltInShell.kt` | The shell helper the app starts through it, and how it hands its binder to the app | ~600 |
 
 The protocol itself is specified in `docs/PROTOCOL.md`; the review should also say whether the
 code matches it.
@@ -96,9 +96,11 @@ Each line is a claim to check. "→" points at where it's enforced.
     `pairing_auth.cpp`.
 25. adbd's server certificate is not verified, by necessity (adbd makes a random key at every
     start; Google's client accepts any). Is the reasoning in the module's SECURITY note sound?
-26. The local socket: the app only listens to UID 2000 or 0 running this very build; the helper
-    only talks to a socket owned by the app's UID. Can another app squat the abstract name in
-    a way that matters? → `ShellLinkServer`, `ShellHelper`
+26. The handover: the helper calls the app's `ShellBinderProvider`, which requires
+    `INTERACT_ACROSS_USERS_FULL`, accepts only UID 2000 or 0, and only a helper of this very
+    build; the helper checks that the provider belongs to the app's package. (A local socket was
+    tried first: SELinux doesn't let the shell connect to an app's socket.) → `ShellBinderProvider`,
+    `ShellHelper`, `HiddenProviders`
 27. The app's RSA key (`files/adb.key`) gives full adb access to the phone while wireless
     debugging is on. It is private to the app, never backed up (`allowBackup=false`), and the app
     switches wireless debugging off again after starting the helper.
