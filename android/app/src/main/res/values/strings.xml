@@ -59,7 +59,9 @@
     <string name="builtin_channel">Setting up the automatic copy</string>
     <string name="builtin_pair_title">Pair paste-get with wireless debugging</string>
     <string name="builtin_pair_text">Tap Pair device with pairing code in Wireless debugging, then type the 6-digit code here.</string>
-    <string name="builtin_pair_working">Pairing…</string>
+    <string name="builtin_pair_step_find">Step 1 of 3: looking for the pairing code screen…</string>
+    <string name="builtin_pair_working">Step 2 of 3: pairing…</string>
+    <string name="builtin_pair_step_grant">Step 3 of 3: getting permission to switch wireless debugging…</string>
     <string name="builtin_pair_failed">Didn\'t work: %s. Try again with a new code.</string>
     <string name="builtin_pair_wrong_code">wrong or expired code</string>
     <string name="builtin_pair_no_dialog">the pairing code screen wasn\'t found: keep it open while you type the code</string>

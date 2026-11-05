@@ -87,9 +87,15 @@ object LocalAdbServices {
         fun stop()
     }
 
+    /**
+     * Where Android delivers resolution callbacks. Never shut down: it still delivers some after
+     * the callbacks are unregistered (`onServiceInfoCallbackUnregistered`), and a shut-down
+     * executor would make that throw on Android's thread, ending the app.
+     */
+    private val callbackExecutor = Executors.newSingleThreadExecutor()
+
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     private class FollowingResolver(private val nsd: NsdManager) : Resolver {
-        private val executor = Executors.newSingleThreadExecutor()
         private val callbacks = mutableListOf<NsdManager.ServiceInfoCallback>()
 
         override fun resolve(info: NsdServiceInfo, onResolved: (NsdServiceInfo, List<InetAddress>) -> Unit) {
@@ -103,7 +109,7 @@ object LocalAdbServices {
                 override fun onServiceInfoCallbackUnregistered() = Unit
             }
             synchronized(callbacks) { callbacks += callback }
-            nsd.registerServiceInfoCallback(info, executor, callback)
+            nsd.registerServiceInfoCallback(info, callbackExecutor, callback)
         }
 
         override fun stop() {
@@ -111,7 +117,6 @@ object LocalAdbServices {
                 callbacks.forEach { runCatching { nsd.unregisterServiceInfoCallback(it) } }
                 callbacks.clear()
             }
-            executor.shutdown()
         }
     }
 

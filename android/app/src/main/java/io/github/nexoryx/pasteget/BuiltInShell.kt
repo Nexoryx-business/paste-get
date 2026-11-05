@@ -139,6 +139,8 @@ class BuiltInShell(
     fun start() {
         if (active) return
         active = true
+        // A notification left by a process that ended mid-pairing.
+        if (mutableState.value.status != BuiltInStatus.PAIRING) notifications.cancel(NOTIFICATION_ID)
         if (!isSetUp) {
             if (mutableState.value.status != BuiltInStatus.PAIRING) set(BuiltInStatus.NOT_SET_UP)
             return
@@ -182,7 +184,12 @@ class BuiltInShell(
      */
     fun beginPairing() {
         set(BuiltInStatus.PAIRING)
-        notifyPairing(context.getString(R.string.builtin_pair_text))
+        worker.execute {
+            // Paired already (an earlier try that didn't finish): no code needed.
+            val paired = AdbKey.exists(context.filesDir) && debuggingOn() &&
+                runCatching { finishSetUp(AdbKey.loadOrCreate(context.filesDir), PROBE_TIMEOUT_MS) }.getOrDefault(false)
+            if (!paired) notifyPairing(context.getString(R.string.builtin_pair_text))
+        }
     }
 
     /** Step 2: the code typed in the notification. On a background thread. */
@@ -199,33 +206,54 @@ class BuiltInShell(
     }
 
     private fun pair(code: String) {
-        notifyPairing(context.getString(R.string.builtin_pair_working))
+        // Each step says so, to tell where it stops if it does.
+        notifyPairing(context.getString(R.string.builtin_pair_step_find))
         try {
             val key = AdbKey.loadOrCreate(context.filesDir)
             val pairing = LocalAdbServices.find(context, LocalAdbServices.PAIRING, FIND_TIMEOUT_MS)
                 ?: return pairingFailed(context.getString(R.string.builtin_pair_no_dialog))
+            notifyPairing(context.getString(R.string.builtin_pair_working))
             onHosts(pairing) { host -> adbPair(host, pairing.port.toUShort(), code, key.pkcs8, key.adbPublicKey()) }
+            notifyPairing(context.getString(R.string.builtin_pair_step_grant))
             Log.i(TAG, "built-in mode: paired with wireless debugging")
-            // So it can switch wireless debugging on by itself after a reboot.
-            val connect = LocalAdbServices.find(context, LocalAdbServices.CONNECT, FIND_TIMEOUT_MS)
-                ?: return pairingFailed(context.getString(R.string.builtin_no_debugging))
-            onHosts(connect) { host ->
-                adbExec(host, connect.port.toUShort(), key.pkcs8, ShellCommands.grantSecureSettings(context.packageName))
-            }
-            Preferences.setBuiltInPaired(context, true)
-            notifications.cancel(NOTIFICATION_ID)
-            main.post {
-                // The UI follows the automatic copy, which now starts this mode.
-                set(BuiltInStatus.STARTING)
-                onSetUp()
-            }
+            if (!finishSetUp(key, FIND_TIMEOUT_MS)) pairingFailed(context.getString(R.string.builtin_no_debugging))
         } catch (e: AdbException.WrongCode) {
             pairingFailed(context.getString(R.string.builtin_pair_wrong_code))
         } catch (e: AdbException) {
             pairingFailed(e.message ?: e.javaClass.simpleName)
-        } catch (e: RuntimeException) {
-            pairingFailed(e.message ?: e.javaClass.simpleName)
+        } catch (e: Throwable) {
+            // Anything else (an I/O error, an internal error of the Rust library) must reach the
+            // user rather than end the app with the notification stuck.
+            Log.w(TAG, "built-in mode: pairing failed", e)
+            pairingFailed("${e.javaClass.simpleName}: ${e.message}")
         }
+    }
+
+    /**
+     * Connects with the paired key and grants the app the right to switch wireless debugging on
+     * by itself after a reboot; then this mode is set up. `false` if wireless debugging wasn't
+     * found or refused the key. Throws on other errors.
+     */
+    private fun finishSetUp(key: AdbKey, timeoutMs: Long): Boolean {
+        val connect = LocalAdbServices.find(context, LocalAdbServices.CONNECT, timeoutMs) ?: return false
+        try {
+            onHosts(connect) { host ->
+                adbExec(host, connect.port.toUShort(), key.pkcs8, ShellCommands.grantSecureSettings(context.packageName))
+            }
+        } catch (e: AdbException.NotAuthorized) {
+            return false
+        } catch (e: AdbException.Unreachable) {
+            return false
+        }
+        Log.i(TAG, "built-in mode: set up")
+        Preferences.setBuiltInPaired(context, true)
+        notifications.cancel(NOTIFICATION_ID)
+        main.post {
+            // The UI follows the automatic copy, which now starts this mode.
+            set(BuiltInStatus.STARTING)
+            onSetUp()
+        }
+        return true
     }
 
     private fun pairingFailed(reason: String) {
@@ -275,8 +303,9 @@ class BuiltInShell(
             set(BuiltInStatus.FAILED, context.getString(R.string.builtin_not_authorized))
         } catch (e: AdbException) {
             set(BuiltInStatus.FAILED, e.message)
-        } catch (e: RuntimeException) {
-            set(BuiltInStatus.FAILED, e.message ?: e.javaClass.simpleName)
+        } catch (e: Throwable) {
+            Log.w(TAG, "built-in mode: start failed", e)
+            set(BuiltInStatus.FAILED, "${e.javaClass.simpleName}: ${e.message}")
         } finally {
             // Off again once the helper runs: it doesn't need it, and nothing else should use it.
             if (switchedOn) setDebugging(false)
@@ -377,6 +406,9 @@ class BuiltInShell(
         /** `Settings.Global.ADB_WIFI_ENABLED`, hidden from the SDK. */
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
         const val FIND_TIMEOUT_MS = 15_000L
+
+        /** How long "Set up" looks for wireless debugging before asking for a code. */
+        const val PROBE_TIMEOUT_MS = 4_000L
         const val HELPER_RETURN_MS = 4_000L
         const val HELPER_START_MS = 10_000L
         const val POLL_MS = 200L
