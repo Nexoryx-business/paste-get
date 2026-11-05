@@ -14,7 +14,8 @@
       "webviewInstallMode": { "type": "skip" },
       "nsis": {
         "installMode": "currentUser",
-        "startMenuFolder": "paste-get"
+        "startMenuFolder": "paste-get",
+        "installerHooks": "./installer-hooks.nsh"
       }
     }
   }

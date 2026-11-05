@@ -281,20 +281,32 @@ mod platform {
 mod platform {
     use super::{SHOWN_FOR_MS, Shown};
 
-    pub struct Desktop;
+    pub struct Desktop {
+        /// The app the toasts come from: paste-get once registered, else PowerShell.
+        #[cfg(windows)]
+        app_id: &'static str,
+    }
 
     impl Desktop {
         pub fn new() -> Self {
-            Self
+            Self {
+                #[cfg(windows)]
+                app_id: windows::register_app_id(),
+            }
         }
 
         pub async fn show(&mut self, shown: Shown) -> anyhow::Result<()> {
+            #[cfg(windows)]
+            let app_id = self.app_id;
             tokio::task::spawn_blocking(move || {
                 #[cfg(windows)]
                 if let Some(url) = shown.open {
-                    return windows::show_link(&shown.summary, shown.body, url);
+                    return windows::show_link(app_id, &shown.summary, shown.body, url);
                 }
-                notify_rust::Notification::new()
+                let mut notification = notify_rust::Notification::new();
+                #[cfg(windows)]
+                notification.app_id(app_id);
+                notification
                     .appname("paste-get")
                     .summary(&shown.summary)
                     .body(shown.body)
@@ -321,13 +333,57 @@ mod platform {
 
     #[cfg(windows)]
     mod windows {
+        use anyhow::Context;
         use tauri_winrt_notification::{Duration, Toast};
+
+        use crate::autostart::APP_ID;
+
+        /// Shown with the toasts, and in Settings → System → Notifications.
+        const ICON: &[u8] = include_bytes!("../tray/icons/icon.png");
+
+        /// Registers paste-get's AppUserModelID, so toasts show its name and icon instead of
+        /// "Windows PowerShell": the way Windows documents for apps installed without a
+        /// package, under `HKEY_CURRENT_USER\Software\Classes\AppUserModelId`. The uninstaller
+        /// removes it (`desktop/tray/installer-hooks.nsh`). Returns the app ID to use, or
+        /// PowerShell's if registering failed, since a toast with an unknown ID isn't shown.
+        pub fn register_app_id() -> &'static str {
+            match register() {
+                Ok(()) => APP_ID,
+                Err(e) => {
+                    tracing::debug!(error = %format!("{e:#}"), "notifications show as PowerShell's");
+                    Toast::POWERSHELL_APP_ID
+                }
+            }
+        }
+
+        fn register() -> anyhow::Result<()> {
+            let dir = dirs::data_local_dir()
+                .context("no local app data directory")?
+                .join("paste-get");
+            std::fs::create_dir_all(&dir)?;
+            let icon = dir.join("notification-icon.png");
+            if std::fs::read(&icon).ok().as_deref() != Some(ICON) {
+                std::fs::write(&icon, ICON)?;
+            }
+            let key = windows_registry::CURRENT_USER
+                .create(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))?;
+            key.set_string("DisplayName", "paste-get")?;
+            key.set_string(
+                "IconUri",
+                icon.to_str().context("the icon path is not Unicode")?,
+            )?;
+            Ok(())
+        }
 
         /// A toast that opens `url` when it, or its Open button, is clicked. Windows calls back
         /// while the daemon runs.
-        pub fn show_link(summary: &str, body: &str, url: String) -> anyhow::Result<()> {
-            // The same app ID notify-rust uses for the other notifications.
-            Toast::new(Toast::POWERSHELL_APP_ID)
+        pub fn show_link(
+            app_id: &str,
+            summary: &str,
+            body: &str,
+            url: String,
+        ) -> anyhow::Result<()> {
+            Toast::new(app_id)
                 .title(summary)
                 .text1(body)
                 .duration(Duration::Short)

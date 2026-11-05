@@ -112,6 +112,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [x] PC side can revoke a paired phone: `pasteget forget <name>`, or the tray menu → the phone
   → *Forget this device*; its session ends at once. The phone is told (`Refusal`, `NOT_PAIRED`),
   forgets the PC too and shows "<PC> unpaired this phone"
+- [x] Windows notifications come from "paste-get" with its icon, not "Windows PowerShell": its
+  AppUserModelID is registered for the user, and removed by the uninstaller
 - [x] Received clips never go to the Windows cloud clipboard (Microsoft account sync); they stay
   in the local `Win+V` history unless sensitive
 
