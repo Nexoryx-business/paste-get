@@ -41,6 +41,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private var photoRequestDenied by mutableStateOf(false)
     private var copiesOn by mutableStateOf(false)
     private var fallback by mutableStateOf(FallbackAccess(readLogs = false, overlay = false))
+    private var notices by mutableStateOf(AccessNotices(supported = false, hidden = null, canChange = false))
 
     private val photoPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -101,6 +103,8 @@ class MainActivity : ComponentActivity() {
                 val logs by pasteGet.autoCopy.logs.state.collectAsStateWithLifecycle()
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
                 val lastReceived by ReceivedClips.last.collectAsStateWithLifecycle()
+                // The built-in mode grants the permission that lets the app hide the notices.
+                LaunchedEffect(builtIn.status) { notices = AccessNotices.of(this@MainActivity) }
                 HomeScreen(
                     deviceId = pasteGet.client.deviceId(),
                     computers = computers,
@@ -115,7 +119,7 @@ class MainActivity : ComponentActivity() {
                     photoRequestDenied = photoRequestDenied,
                     onScreenshotsChange = ::toggleScreenshots,
                     onOpenSettings = ::openAppSettings,
-                    autoCopy = AutoCopyCardState(copiesOn, builtIn, shizuku, logs, fallback, lastCopy),
+                    autoCopy = AutoCopyCardState(copiesOn, builtIn, shizuku, logs, fallback, notices, lastCopy),
                     autoCopyActions = AutoCopyActions(
                         onChange = ::setSendCopies,
                         onSetUpBuiltIn = ::setUpBuiltIn,
@@ -128,6 +132,8 @@ class MainActivity : ComponentActivity() {
                         onGrantFallback = ::grantFallback,
                         onAllowOverlay = ::openOverlaySettings,
                         onRetryLogs = pasteGet.autoCopy.logs::retry,
+                        onHideNotices = ::hideNotices,
+                        onOpenPrivacySettings = ::openPrivacySettings,
                     ),
                 )
             }
@@ -142,6 +148,7 @@ class MainActivity : ComponentActivity() {
         refreshScreenshots()
         copiesOn = Preferences.sendCopies(this)
         fallback = FallbackAccess.of(this)
+        notices = AccessNotices.of(this)
         // Android 13+ asks for log access only while the app is in front (mode B).
         pasteGet.autoCopy.setInFront(true)
     }
@@ -267,6 +274,21 @@ class MainActivity : ComponentActivity() {
                 fallback = FallbackAccess.of(this)
                 message = failed?.let { getString(R.string.fallback_failed, it) } ?: getString(R.string.fallback_granted)
             }
+        }
+    }
+
+    /** Only when the user asks: it applies to every app. */
+    private fun hideNotices(hide: Boolean) {
+        if (!AccessNotices.set(this, hide)) message = getString(R.string.notices_failed)
+        notices = AccessNotices.of(this)
+    }
+
+    /** Where "Show clipboard access" is. Some vendors move it: then the main settings. */
+    private fun openPrivacySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_PRIVACY_SETTINGS))
+        } catch (e: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
         }
     }
 
@@ -456,6 +478,7 @@ private data class AutoCopyCardState(
     val shizuku: ShizukuState,
     val logs: LogStatus,
     val fallback: FallbackAccess,
+    val notices: AccessNotices,
     val lastCopy: LastCopy?,
 )
 
@@ -471,6 +494,8 @@ private class AutoCopyActions(
     val onGrantFallback: () -> Unit,
     val onAllowOverlay: () -> Unit,
     val onRetryLogs: () -> Unit,
+    val onHideNotices: (Boolean) -> Unit,
+    val onOpenPrivacySettings: () -> Unit,
 )
 
 /** The automatic copy: on or off, how it works right now, and what to do if it doesn't. */
@@ -499,6 +524,7 @@ private fun AutoCopyCard(state: AutoCopyCardState, actions: AutoCopyActions) {
                 }
                 if (!builtInSetUp) FallbackLine(state.shizuku, state.fallback, actions)
                 state.lastCopy?.let { LastCopyText(it) }
+                if (state.notices.supported) NoticesLine(state.notices, actions)
             }
         }
     }
@@ -580,6 +606,26 @@ private fun FallbackLine(shizuku: ShizukuState, fallback: FallbackAccess, action
             TextButton(onClick = actions.onAllowOverlay) { Text(stringResource(R.string.fallback_allow_overlay)) }
         }
         else -> {}
+    }
+}
+
+/**
+ * Android's "Shell pasted from your clipboard" after each copy: an opt-in switch to hide it (for
+ * every app, as the system's own switch does), or the way to that switch.
+ */
+@Composable
+private fun NoticesLine(notices: AccessNotices, actions: AutoCopyActions) {
+    if (notices.switchable) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.notices_title), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.notices_text), style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = notices.hidden == true, onCheckedChange = actions.onHideNotices)
+        }
+    } else if (notices.hidden != true) {
+        Text(stringResource(R.string.notices_by_hand), style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = actions.onOpenPrivacySettings) { Text(stringResource(R.string.notices_open_settings)) }
     }
 }
 

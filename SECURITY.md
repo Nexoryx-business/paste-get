@@ -57,6 +57,9 @@ running `adb`: that is how it starts its shell helper. Consequences:
   as the helper runs; it switches it on for a moment only on Wi-Fi.
 - To revoke it: Settings → Developer options → Wireless debugging → Paired devices → paste-get →
   Forget, or "Pair again" in the app.
+- The same grant lets the app change secure settings. It uses it for wireless debugging and,
+  only if you turn on *Hide "pasted from your clipboard"*, for Android's *Show clipboard access*
+  switch, which then applies to every app.
 
 ## What it doesn't protect against (yet)
 

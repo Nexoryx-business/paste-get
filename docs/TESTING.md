@@ -244,7 +244,7 @@ Watch the PC daemon's terminal, and on the phone `adb logcat -s paste-get` if yo
 | A2 | In any app (Chrome, Notes…), select text → **Copy**. On the PC, `Ctrl+V` | The text is pasted. The card says "Last copy (…) sent at …" |
 | A3 | Copy the same text again | The PC logs nothing new (the phone logs "seen before, not sent") |
 | A4 | Copy text **on the PC**, paste it on the phone, wait 5 s | The PC does not receive it back from the phone |
-| A5 | During A2: does the phone show a notice like "Shell pasted from your clipboard"? | Report what it says (Android 12+ may show one; Settings → Privacy → "Show clipboard access" turns it off) |
+| A5 | During A2: does the phone show a notice like "Shell pasted from your clipboard"? | Report what it says (Android 12+ may show one; the card's *Open privacy settings* leads to "Show clipboard access", which turns it off) |
 | A6 | Copy a password from a password manager (Bitwarden, KeePassDX…), paste it on the PC | Pasted, and absent from Windows' clipboard history (`Win+V`) or Klipper |
 | A7 | Windows, if you have a second PC on the same Microsoft account with *Settings → System → Clipboard → Share across devices* on: copy text on the phone, then `Win+V` on the other PC | Not there (it is in this PC's own `Win+V` history) |
 | B1 | With Shizuku running, tap **Grant them (paste-get restarts)** | paste-get restarts. The card says "Ready for when Shizuku stops" |
@@ -401,6 +401,7 @@ If Shizuku was set up, the built-in mode replaces it; you can uninstall Shizuku.
 | W5 | Restart the phone with Wi-Fi off | The card says "waiting for Wi-Fi"; turn Wi-Fi on: it starts by itself |
 | W6 | In Wireless debugging → Paired devices, forget paste-get, then restart the phone | The card says "wireless debugging no longer knows paste-get: pair again" |
 | W7 | **Pair again** in the card | Back to step 2 |
+| W8 | With the built-in mode running, turn on **Hide "pasted from your clipboard"** in the card, then repeat W2 | Pasted, with no notice. Settings → Privacy → *Show clipboard access* is now off. Turning the switch off brings the notice back |
 
 If a step fails, the card shows why. **Please report that text**, and, if you can, the log:
 `adb logcat -s paste-get` (lines start with "built-in mode" or "shell helper").

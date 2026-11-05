@@ -66,7 +66,10 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
 - [ ] Built-in mode, without Shizuku: the app pairs itself with wireless debugging and starts
   its own shell helper, also after a reboot (prototype, `TESTING.md` section 12). Set up and
   running on the POCO M8 5G, November 2026 (W1); still to check: copies (W2), wireless debugging
-  off (W3) and restarts (W4–W6). Then an option to hide the "Shell pasted" notice
+  off (W3) and restarts (W4–W6)
+- [x] Opt-in switch to hide Android's "Shell pasted from your clipboard" notice (Android's own
+  *Show clipboard access* setting, for every app), when the built-in mode gave the app
+  `WRITE_SECURE_SETTINGS`; otherwise a button to the privacy settings (`TESTING.md`, W8)
 - **Done when:** copy on the phone → paste on the PC, no tap, even after the POCO reboots (mode B).
   ✅ up to the phone API in `ffi/tests/phone_and_pc.rs`, and the app's logic in Robolectric tests;
   pending on the real phone. On Android 13+, mode B needs one tap after a reboot: Android lets an

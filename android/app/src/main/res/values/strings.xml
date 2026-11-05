@@ -95,6 +95,11 @@
     <string name="logs_starting">Meanwhile, paste-get reads copies another way. If Android asks, allow paste-get to access the device logs.</string>
     <string name="logs_running">To read each copy, a window shows for a moment, which may close the keyboard. Shizuku avoids that.</string>
     <string name="logs_retry">Ask again</string>
+    <string name="notices_title">Hide \"pasted from your clipboard\"</string>
+    <string name="notices_text">Android shows it after each copy sent. This is Android\'s own switch: it hides the notice for every app, not only paste-get. Turn it back on here or in Settings → Privacy.</string>
+    <string name="notices_by_hand">Android shows \"Shell pasted from your clipboard\" after each copy sent. To hide it, turn off Show clipboard access in Settings → Privacy (it applies to every app).</string>
+    <string name="notices_open_settings">Open privacy settings</string>
+    <string name="notices_failed">Android didn\'t let paste-get change this setting: use Settings → Privacy instead</string>
     <string name="copies_channel">Sending copies</string>
     <string name="copies_paused_title">Copies are not sent</string>
     <string name="copies_paused_text">Open paste-get to send what you copy again</string>
