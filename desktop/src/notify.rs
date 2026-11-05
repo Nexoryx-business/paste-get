@@ -20,19 +20,25 @@ pub struct Received {
     pub image: bool,
     /// Name of the device it came from.
     pub from: String,
+    /// For a one-time code: the app whose notification held it. The code itself is never shown.
+    pub code_from: Option<String>,
 }
 
 impl Received {
     pub fn summary(&self) -> String {
+        if let Some(app) = &self.code_from {
+            return format!("Code from {app} ({}) ✓", self.from);
+        }
         let kind = if self.image { "Image" } else { "Text" };
         format!("{kind} from {} ✓", self.from)
     }
 
-    /// Whether `setting` asks for a notification about this clip.
+    /// Whether `setting` asks for a notification about this clip. A one-time code always gets
+    /// one, unless notifications are off: it replaced what was on the clipboard by itself.
     pub fn wanted_by(&self, setting: NotifyFor) -> bool {
         match setting {
             NotifyFor::Off => false,
-            NotifyFor::Images => self.image,
+            NotifyFor::Images => self.image || self.code_from.is_some(),
             NotifyFor::All => true,
         }
     }
@@ -376,6 +382,7 @@ mod tests {
         let image = Received {
             image: true,
             from: "POCO M8 5G".into(),
+            code_from: None,
         };
         assert_eq!(image.summary(), "Image from POCO M8 5G ✓");
 
@@ -384,6 +391,15 @@ mod tests {
             ..image.clone()
         };
         assert_eq!(text.summary(), "Text from POCO M8 5G ✓");
+
+        let code = Received {
+            image: false,
+            from: "POCO M8 5G".into(),
+            code_from: Some("Messages".into()),
+        };
+        assert_eq!(code.summary(), "Code from Messages (POCO M8 5G) ✓");
+        assert!(code.wanted_by(NotifyFor::Images));
+        assert!(!code.wanted_by(NotifyFor::Off));
     }
 
     #[test]
@@ -391,10 +407,12 @@ mod tests {
         let image = Received {
             image: true,
             from: "phone".into(),
+            code_from: None,
         };
         let text = Received {
             image: false,
             from: "phone".into(),
+            code_from: None,
         };
 
         assert!(image.wanted_by(NotifyFor::Images));

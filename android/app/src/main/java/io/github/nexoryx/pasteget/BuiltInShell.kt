@@ -98,6 +98,9 @@ class BuiltInShell(
     val isSetUp: Boolean
         get() = Preferences.builtInPaired(context) && AdbKey.exists(context.filesDir)
 
+    /** The helper's shell service, once it runs. */
+    fun shell(): IShellClipboard? = helper
+
     private val changed = object : IClipboardChanged.Stub() {
         override fun changed() {
             worker.execute(::readNewCopy)

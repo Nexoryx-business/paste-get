@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
-use pasteget_core::clip::{Clip, mime};
+use pasteget_core::clip::{Clip, Kind, mime};
 use pasteget_core::detect;
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
@@ -282,6 +282,7 @@ impl Daemon {
             data: content.data,
             sensitive: content.sensitive,
             origin: self.device_id(),
+            kind: Kind::Copy,
         };
         self.shared.remember_clip(&clip, None);
         self.shared.peers.broadcast(&clip, None)
@@ -446,6 +447,7 @@ impl Shared {
             data: content.data,
             sensitive: content.sensitive,
             origin: self.identity.device_id(),
+            kind: Kind::Copy,
         };
         self.remember_clip(&clip, None);
         let sent_to = self.peers.broadcast(&clip, None);
@@ -530,6 +532,10 @@ impl SessionEvents for Shared {
         let received = Received {
             image: clip.mime_type != mime::TEXT,
             from: self.name_of(&peer),
+            code_from: match &clip.kind {
+                Kind::OneTimeCode { app } => Some(app.clone()),
+                Kind::Copy => None,
+            },
         };
         // A link gets a notification of its own, which opens it when clicked.
         let link = clip
@@ -538,11 +544,12 @@ impl SessionEvents for Shared {
                 self.offer_to_open_links && self.notify_for != NotifyFor::Off && !clip.sensitive
             })
             .and_then(detect::link);
-        // Sensitive clips stay as quiet as possible.
+        // Sensitive clips stay as quiet as possible: a one-time code only says where it's from.
+        let quiet = clip.sensitive && received.code_from.is_none();
         let notifier = self
             .notifier
             .clone()
-            .filter(|_| !clip.sensitive && (link.is_some() || received.wanted_by(self.notify_for)));
+            .filter(|_| !quiet && (link.is_some() || received.wanted_by(self.notify_for)));
         let (mime_type, len) = (clip.mime_type.clone(), clip.data.len());
         let applied = move |took: Duration| {
             tracing::info!(%mime_type, len, ms = took.as_millis(), "clip applied to the clipboard");
@@ -671,6 +678,7 @@ async fn local_changes_loop(shared: Arc<Shared>, mut changes: mpsc::Receiver<Con
             data: content.data,
             sensitive: content.sensitive,
             origin: shared.identity.device_id(),
+            kind: Kind::Copy,
         };
         shared.remember_clip(&clip, None);
         let sent_to = shared.peers.broadcast(&clip, None);
@@ -790,7 +798,8 @@ mod tests {
             *laptop.notifications.0.lock().unwrap(),
             [Received {
                 image: true,
-                from: "pc".into()
+                from: "pc".into(),
+                code_from: None,
             }]
         );
         assert!(pc.notifications.0.lock().unwrap().is_empty());

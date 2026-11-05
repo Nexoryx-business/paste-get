@@ -20,6 +20,19 @@ class ShellCommandsTest {
     }
 
     @Test
+    fun codeAccessIsTheListenerAndOnAndroid15TheHiddenCodes() {
+        val app = "io.github.nexoryx.pasteget"
+        val listener = "io.github.nexoryx.pasteget.CodeListener"
+        val allowListener = listOf("cmd", "notification", "allow_listener", "$app/$listener")
+
+        assertEquals(listOf(allowListener), ShellCommands.codeAccessGrants(app, listener, sdk = 34))
+        assertEquals(
+            listOf(allowListener, listOf("appops", "set", app, "RECEIVE_SENSITIVE_NOTIFICATIONS", "allow")),
+            ShellCommands.codeAccessGrants(app, listener, sdk = 35),
+        )
+    }
+
+    @Test
     fun successIsQuiet() {
         assertNull(ShellCommands.run(listOf("true")))
         assertEquals("", ShellCommands.runAll(listOf(listOf("true"), listOf("true"))))

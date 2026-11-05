@@ -33,4 +33,11 @@ interface IShellClipboard {
      * the app to apply the first. Returns what failed, or an empty string.
      */
     String grantFallback() = 4;
+
+    /**
+     * Grants the app what sending one-time codes needs: reading notifications, and on Android 15
+     * and later, seeing the codes Android hides from apps that read them. Lasts across reboots.
+     * Returns what failed, or an empty string.
+     */
+    String grantCodeAccess() = 5;
 }

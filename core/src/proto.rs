@@ -44,6 +44,8 @@ mod tests {
                 mime_type: "text/plain;charset=utf-8".into(),
                 size: 5,
                 sensitive: true,
+                kind: ClipKind::OneTimeCode.into(),
+                source_app: "Messages".into(),
             })),
         };
 

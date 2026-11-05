@@ -103,6 +103,9 @@ class AutoCopy(private val app: PasteGetApp) {
         logs.setActive(false)
     }
 
+    /** A service running as the shell user, if the built-in mode or Shizuku has one now. */
+    fun shell(): IShellClipboard? = builtIn.shell() ?: shizuku.shell()
+
     /** On the main thread, when an activity of the app comes to the front or leaves it. */
     fun setInFront(front: Boolean) = logs.setInFront(front)
 

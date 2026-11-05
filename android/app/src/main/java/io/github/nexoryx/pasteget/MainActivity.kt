@@ -72,6 +72,8 @@ class MainActivity : ComponentActivity() {
     private var copiesOn by mutableStateOf(false)
     private var fallback by mutableStateOf(FallbackAccess(readLogs = false, overlay = false))
     private var notices by mutableStateOf(AccessNotices(supported = false, hidden = null, canChange = false))
+    private var codesOn by mutableStateOf(false)
+    private var codeAccess by mutableStateOf(CodeAccess(listening = false, seesCodes = null))
 
     private val photoPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -103,6 +105,8 @@ class MainActivity : ComponentActivity() {
                 val logs by pasteGet.autoCopy.logs.state.collectAsStateWithLifecycle()
                 val lastCopy by pasteGet.autoCopy.lastCopy.collectAsStateWithLifecycle()
                 val lastReceived by ReceivedClips.last.collectAsStateWithLifecycle()
+                val lastCode by OneTimeCodes.last.collectAsStateWithLifecycle()
+                val shellReady = builtIn.status == BuiltInStatus.WATCHING || shizuku.status == ShizukuStatus.WATCHING
                 // The built-in mode grants the permission that lets the app hide the notices.
                 LaunchedEffect(builtIn.status) { notices = AccessNotices.of(this@MainActivity) }
                 HomeScreen(
@@ -135,6 +139,12 @@ class MainActivity : ComponentActivity() {
                         onHideNotices = ::hideNotices,
                         onOpenPrivacySettings = ::openPrivacySettings,
                     ),
+                    codes = CodesCardState(codesOn, codeAccess, shellReady, lastCode),
+                    codesActions = CodesActions(
+                        onChange = ::setSendCodes,
+                        onAllow = ::allowCodes,
+                        onOpenSettings = ::openNotificationAccess,
+                    ),
                 )
             }
         }
@@ -149,6 +159,8 @@ class MainActivity : ComponentActivity() {
         copiesOn = Preferences.sendCopies(this)
         fallback = FallbackAccess.of(this)
         notices = AccessNotices.of(this)
+        codesOn = Preferences.sendCodes(this)
+        codeAccess = OneTimeCodes.access(this)
         // Android 13+ asks for log access only while the app is in front (mode B).
         pasteGet.autoCopy.setInFront(true)
     }
@@ -277,6 +289,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun setSendCodes(on: Boolean) {
+        Preferences.setSendCodes(this, on)
+        codesOn = on
+        codeAccess = OneTimeCodes.access(this)
+    }
+
+    /** Through the shell user: notification access, and on Android 15+ seeing the codes. */
+    private fun allowCodes() {
+        val shell = pasteGet.autoCopy.shell() ?: return openNotificationAccess()
+        message = getString(R.string.codes_allowing)
+        lifecycleScope.launch {
+            val failed = withContext(Dispatchers.IO) {
+                try {
+                    shell.grantCodeAccess().ifEmpty { null }
+                } catch (e: Exception) {
+                    e.message ?: e.javaClass.simpleName
+                }
+            }
+            codeAccess = OneTimeCodes.access(this@MainActivity)
+            message = failed?.let { getString(R.string.codes_allow_failed, it) } ?: getString(R.string.codes_allowed)
+        }
+    }
+
+    /** paste-get's own page in Notification access, where the phone has one. */
+    private fun openNotificationAccess() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, OneTimeCodes.listener(this).flattenToString())
+        } else {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+    }
+
     /** Only when the user asks: it applies to every app. */
     private fun hideNotices(hide: Boolean) {
         if (!AccessNotices.set(this, hide)) message = getString(R.string.notices_failed)
@@ -355,6 +405,8 @@ private fun HomeScreen(
     onOpenSettings: () -> Unit,
     autoCopy: AutoCopyCardState,
     autoCopyActions: AutoCopyActions,
+    codes: CodesCardState,
+    codesActions: CodesActions,
 ) {
     Column(
         modifier = Modifier
@@ -393,6 +445,7 @@ private fun HomeScreen(
         lastDelivery?.let { LastDeliveryText(it) }
         lastReceived?.let { LastReceivedText(it) }
         AutoCopyCard(autoCopy, autoCopyActions)
+        CodesCard(codes, codesActions)
 
         if (computers.isNotEmpty()) {
             Text(stringResource(R.string.paired_computers), style = MaterialTheme.typography.titleSmall)
@@ -642,6 +695,76 @@ private fun LogLine(logs: LogStatus, actions: AutoCopyActions) {
     if (logs == LogStatus.STARTING) {
         TextButton(onClick = actions.onRetryLogs) { Text(stringResource(R.string.logs_retry)) }
     }
+}
+
+/** What the 2FA codes card shows. */
+private data class CodesCardState(
+    val on: Boolean,
+    val access: CodeAccess,
+    /** The built-in mode or Shizuku runs, so access is one tap away. */
+    val shellReady: Boolean,
+    val last: LastCode?,
+)
+
+private class CodesActions(
+    val onChange: (Boolean) -> Unit,
+    val onAllow: () -> Unit,
+    val onOpenSettings: () -> Unit,
+)
+
+/** One-time codes from notifications: on or off, and what's missing to receive them. */
+@Composable
+private fun CodesCard(state: CodesCardState, actions: CodesActions) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.codes_title), style = MaterialTheme.typography.bodyLarge)
+                    val last = state.last
+                    Text(
+                        when {
+                            !state.on -> stringResource(R.string.codes_off)
+                            last != null -> lastCodeText(last)
+                            else -> stringResource(R.string.codes_waiting)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = state.on, onCheckedChange = actions.onChange)
+            }
+            if (state.on) CodesAccessLine(state, actions)
+        }
+    }
+}
+
+@Composable
+private fun CodesAccessLine(state: CodesCardState, actions: CodesActions) {
+    when {
+        !state.access.listening -> {
+            Text(stringResource(R.string.codes_needs_access), style = MaterialTheme.typography.bodySmall)
+            if (state.shellReady) {
+                TextButton(onClick = actions.onAllow) { Text(stringResource(R.string.codes_allow)) }
+            } else {
+                TextButton(onClick = actions.onOpenSettings) { Text(stringResource(R.string.codes_open_settings)) }
+                Text(stringResource(R.string.codes_restricted), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        state.access.seesCodes == false -> {
+            Text(stringResource(R.string.codes_hidden), style = MaterialTheme.typography.bodySmall)
+            if (state.shellReady) {
+                TextButton(onClick = actions.onAllow) { Text(stringResource(R.string.codes_allow)) }
+            } else {
+                Text(stringResource(R.string.codes_needs_shell), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        else -> {}
+    }
+}
+
+@Composable
+private fun lastCodeText(code: LastCode): String {
+    val time = DateFormat.getTimeFormat(LocalContext.current).format(Date(code.atMillis))
+    return pluralStringResource(R.plurals.last_code, code.sentTo, code.app, time, code.sentTo)
 }
 
 /** What the last clip from a computer was, and whether it made it to the phone's clipboard. */

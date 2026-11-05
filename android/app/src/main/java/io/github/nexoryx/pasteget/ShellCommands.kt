@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
  */
 object ShellCommands {
     private const val TIMEOUT_S = 10L
+    private const val ANDROID_15 = 35
 
     /**
      * What the fallback mode needs, granted to [app]. `appops` comes first: granting a permission
@@ -19,6 +20,16 @@ object ShellCommands {
         listOf("appops", "set", app, "SYSTEM_ALERT_WINDOW", "allow"),
         listOf("pm", "grant", app, "android.permission.READ_LOGS"),
     )
+
+    /**
+     * What sending one-time codes needs, granted to [app]: its notification [listener] (a class
+     * name) enabled, and on Android 15+ ([sdk] 35) the codes Android otherwise hides from
+     * notification listeners. Both are what a user could type in `adb shell`.
+     */
+    fun codeAccessGrants(app: String, listener: String, sdk: Int): List<List<String>> = buildList {
+        add(listOf("cmd", "notification", "allow_listener", "$app/$listener"))
+        if (sdk >= ANDROID_15) add(listOf("appops", "set", app, "RECEIVE_SENSITIVE_NOTIFICATIONS", "allow"))
+    }
 
     /**
      * The command line, for `sh -c` (adb's `exec:`), that starts [ShellHelper] from the app's APK

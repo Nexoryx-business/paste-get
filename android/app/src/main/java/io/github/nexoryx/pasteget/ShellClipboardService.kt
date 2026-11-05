@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.Context
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import android.os.Parcel
 import android.os.RemoteException
@@ -24,10 +25,18 @@ import kotlin.system.exitProcess
  * Binder can carry, so the app can fall back to another mode instead of this process crashing.
  */
 @Keep
-class ShellClipboardService(private val context: Context?) : IShellClipboard.Stub() {
+class ShellClipboardService(
+    private val context: Context?,
+    /** The app the grants are for: Shizuku tells it through [context], the built-in helper itself. */
+    private val appPackage: String?,
+) : IShellClipboard.Stub() {
+    /** Shizuku's: it passes the app's Context. */
+    @Keep
+    constructor(context: Context?) : this(context, context?.packageName)
+
     /** For Shizuku servers older than API 13, which don't pass a Context. */
     @Keep
-    constructor() : this(null)
+    constructor() : this(null, null)
 
     private val clipboard: HiddenCalls by lazy { HiddenCalls(clipboardService(), SHELL_PACKAGE) }
 
@@ -73,10 +82,15 @@ class ShellClipboardService(private val context: Context?) : IShellClipboard.Stu
         clipboard.call(GET_CLIP, userId) as ClipData?
     }
 
-    /** Grants only the app this service belongs to, which Shizuku tells through the Context. */
+    /** Grants only the app this service belongs to. */
     override fun grantFallback(): String = carried {
-        val app = context?.packageName ?: return@carried "Shizuku is too old to tell which app to grant"
+        val app = appPackage ?: return@carried NO_APP
         ShellCommands.runAll(ShellCommands.fallbackGrants(app))
+    }
+
+    override fun grantCodeAccess(): String = carried {
+        val app = appPackage ?: return@carried NO_APP
+        ShellCommands.runAll(ShellCommands.codeAccessGrants(app, CodeListener::class.java.name, Build.VERSION.SDK_INT))
     }
 
     /** Tells the app about each change. The app reads the clip itself, if it wants it. */
@@ -119,6 +133,8 @@ class ShellClipboardService(private val context: Context?) : IShellClipboard.Stu
     }
 
     private companion object {
+        const val NO_APP = "Shizuku is too old to tell which app to grant"
+
         /** A package of the shell user. With it, Android lets shell read the clipboard in the background. */
         const val SHELL_PACKAGE = "com.android.shell"
         const val LISTENER = "android.content.IOnPrimaryClipChangedListener"

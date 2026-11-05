@@ -157,7 +157,17 @@ never re-sends a clip it received (see *Echo loops*), and ignores offers whose
 `origin_device` is itself.
 
 **`sensitive`** means the source marked the clip as secret (password, 2FA code). Receivers put it
-on the clipboard but must keep it out of history, notifications and OS clipboard managers.
+on the clipboard but must keep it out of history and OS clipboard managers. A notification may
+say that it arrived, never what it holds.
+
+**`kind`** says what the clip is when the source knows more than its MIME type:
+- `CLIP_KIND_COPY` (0): something the user copied. Also how a receiver treats a kind it doesn't
+  know, so new kinds stay compatible.
+- `CLIP_KIND_ONE_TIME_CODE` (1): a one-time code (2FA) the phone found in a notification of the
+  app named by **`source_app`**. It must be text; receivers treat it as sensitive even if the flag
+  is missing, and may tell the user "Code from <source_app>". `source_app` is untrusted: control
+  characters are removed and it is cut to 64 characters. A one-time code offer that isn't text is
+  treated as a copy.
 
 ### 4.3 `Ping` / `Pong`
 

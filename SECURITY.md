@@ -42,6 +42,7 @@ The full protocol is in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 | Another user of the same computer | The local control channel is a socket in a directory only you can open (Linux), or a named pipe that rejects remote clients and includes your user name (Windows) |
 | Passwords ending up in logs | Logs contain sizes, MIME types and hashes only, never clipboard contents |
 | Passwords lingering | Clips marked sensitive (password managers) skip clipboard history on Windows and the tray's *Recent* list |
+| 2FA codes leaking | Opt-in. The phone reads notifications on the phone only; just the code's digits go to paired computers, as a secret (out of history and *Recent*). The PC's notification names the app, never the code. Neither the code nor the message is logged |
 | A link from a paired device opening by itself | Nothing opens without a click on its notification. Only `http`/`https` links that are the whole clip; the site is shown first; links with a `user@` part (which hide the real site) and non-ASCII hosts are refused |
 | Clips leaving the local network through the OS | On Windows, received clips are marked so the cloud clipboard doesn't upload them to the Microsoft account (they stay in the local Win+V history unless sensitive) |
 | Oversized or malformed input from a paired device | Frames are limited to 1 MiB, clips to 64 MiB, images are size-checked before decoding; the parsers are fuzzed |
@@ -58,6 +59,10 @@ running `adb`: that is how it starts its shell helper. Consequences:
   as the helper runs; it switches it on for a moment only on Wi-Fi.
 - To revoke it: Settings → Developer options → Wireless debugging → Paired devices → paste-get →
   Forget, or "Pair again" in the app.
+- With **Send 2FA codes**, the same shell grants the app notification access and, on Android 15,
+  the right to see codes Android hides from notification listeners
+  (`RECEIVE_SENSITIVE_NOTIFICATIONS`). Revoke them in Settings → Notification access, or with
+  `adb shell appops set io.github.nexoryx.pasteget RECEIVE_SENSITIVE_NOTIFICATIONS default`.
 - The same grant lets the app change secure settings. It uses it for wireless debugging and,
   only if you turn on *Hide "pasted from your clipboard"*, for Android's *Show clipboard access*
   switch, which then applies to every app.

@@ -20,11 +20,12 @@ make trust decisions. In order of risk:
 | `core/src/clip.rs` | Clip offer/chunks/ack: sizes, offsets, hash check, reassembly | ~510 |
 | `core/src/framing.rs` | Length-prefixed frames, 1 MiB limit | ~190 |
 | `core/src/echo.rs` | Echo-loop guard (not a security boundary, but it hashes untrusted data) | ~120 |
-| `core/src/detect.rs` | Finds a link to offer to open in untrusted text | ~200 |
+| `core/src/detect.rs` | Finds a link to open, or a one-time code, in untrusted text | ~450 |
 | `desktop/src/daemon.rs` | `handle_incoming`: known device → session, unknown → pairing only while a window is open | part |
 | `desktop/src/control.rs` | Local control channel: Unix socket in a 0700 directory, Windows named pipe | ~550 |
 | `desktop/src/config.rs` | Key file permissions (0600), profile names (path traversal) | part |
 | `ffi/src/lib.rs` | The same decisions on the phone side, through the core | part |
+| `android/…/OneTimeCodes.kt` | Notification listener for 2FA codes: what it reads, what it sends | ~170 |
 | `ffi/src/wireless_adb/` | ADB client for the phone's own wireless debugging: pairing (TLS 1.3 + BoringSSL SPAKE2 + AES-GCM), `exec:` over TLS | ~700 |
 | `android/…/ShellHelper.kt`, `ShellBinderProvider.kt`, `HiddenProviders.kt`, `BuiltInShell.kt` | The shell helper the app starts through it, and how it hands its binder to the app | ~600 |
 
@@ -116,6 +117,11 @@ Each line is a claim to check. "→" points at where it's enforced.
     open (no userinfo, ASCII host). The URL reaches the browser without a shell or command line
     in between (`xdg-open` with one argument, `ShellExecuteW`). → `core/src/detect.rs` (fuzz
     target `detect`), `desktop/src/notify.rs`
+29. 2FA codes: off by default; only the digits of a code leave the phone, as a sensitive
+    `CLIP_KIND_ONE_TIME_CODE` clip that receivers treat as secret even without the flag, with a
+    cleaned-up app name. The detector is bounded (4,096 characters, no superlinear blow-up) and
+    can't panic. The shell grants are fixed commands for this app's own listener only.
+    → `core/src/detect.rs`, `core/src/clip.rs`, `OneTimeCodes.kt`, `ShellCommands.codeAccessGrants`
 
 ## Known gaps (not bugs to report, but worth an opinion)
 

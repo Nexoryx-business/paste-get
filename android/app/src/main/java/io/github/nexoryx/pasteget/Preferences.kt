@@ -11,6 +11,7 @@ object Preferences {
     private const val SEND_SCREENSHOTS = "send_screenshots"
     private const val SEND_COPIES = "send_copies"
     private const val BUILT_IN_PAIRED = "built_in_paired"
+    private const val SEND_CODES = "send_codes"
 
     /** Off until the user turns it on and grants photo access. */
     fun sendScreenshots(context: Context): Boolean =
@@ -26,6 +27,14 @@ object Preferences {
 
     fun setSendCopies(context: Context, send: Boolean) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putBoolean(SEND_COPIES, send) }
+    }
+
+    /** Off until the user turns it on: one-time codes from notifications ([OneTimeCodes]). */
+    fun sendCodes(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(SEND_CODES, false)
+
+    fun setSendCodes(context: Context, send: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putBoolean(SEND_CODES, send) }
     }
 
     /** Whether the app's key is paired with wireless debugging ([BuiltInShell]). */

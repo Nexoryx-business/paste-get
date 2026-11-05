@@ -72,6 +72,19 @@ message ClipOffer {
   // The source marked the clip as sensitive (password, 2FA code...).
   // Receivers must keep it out of history and clipboard managers.
   bool sensitive = 6;
+  // What the clip is, when the source knows more than its type. A receiver treats a kind it
+  // doesn't know as CLIP_KIND_COPY.
+  ClipKind kind = 7;
+  // For CLIP_KIND_ONE_TIME_CODE: the app whose notification held the code, e.g. "Messages",
+  // shown to the user. Untrusted: receivers clean it up like a device name.
+  string source_app = 8;
+}
+
+enum ClipKind {
+  // Something the user copied.
+  CLIP_KIND_COPY = 0;
+  // A one-time code (2FA) the phone found in a notification. Text, and always sensitive.
+  CLIP_KIND_ONE_TIME_CODE = 1;
 }
 
 // A slice of a clip's bytes. Chunks are sent in order, without gaps.

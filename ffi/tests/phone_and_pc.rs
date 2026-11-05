@@ -415,6 +415,31 @@ fn copies_on_the_phone_reach_the_pc_without_echo() {
     });
 }
 
+/// v0.2: a one-time code from a notification lands on the PC clipboard, as a secret.
+#[test]
+fn a_one_time_code_reaches_the_pc_clipboard_as_a_secret() {
+    let pc = start_pc();
+    let phone = connected_phone(&pc, "POCO");
+
+    assert_eq!(
+        pasteget_ffi::find_one_time_code("G-482913 is your Google verification code".into()),
+        Some("482913".into())
+    );
+    assert_eq!(
+        phone
+            .client
+            .send_one_time_code("482913".into(), "Messages".into()),
+        1
+    );
+    wait_until("the code on the PC clipboard", || {
+        pc.clipboard.get() == Some(Raw::Text("482913".into()))
+    });
+    // Kept out of the tray's Recent list, like any secret.
+    assert!(pc.daemon.recent().is_empty());
+    // If the user then copies it on the phone, it isn't sent twice.
+    assert_eq!(phone.client.copied_text("482913".into(), true), None);
+}
+
 /// Roadmap M6: text of any length copied on the PC reaches the phone whole, in many chunks.
 /// The app puts texts this long on its clipboard as a file link (Binder's 1 MB limit).
 #[test]

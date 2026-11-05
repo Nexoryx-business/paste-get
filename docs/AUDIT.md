@@ -156,7 +156,7 @@ OS-specific extras (sensitive markers, file lists, HTML) can be added per platfo
 | Text both ways | Section 2. Writing the Android clipboard from the background is allowed | 🟡 | Background reading |
 | Images PC → phone | Share via `FileProvider` URI, not raw bytes | 🟡 | 1 MB Binder limit |
 | Skip sensitive copies | `EXTRA_IS_SENSITIVE`, foreground app (usage stats via Shizuku), patterns (Luhn, IBAN, private keys) | 🟡 | Many apps don't set the flag |
-| 2FA codes | Notification listener + code extraction | 🟡 | **Android 15 hides OTPs** from untrusted listeners. Fix via Shizuku: `appops set <pkg> RECEIVE_SENSITIVE_NOTIFICATIONS allow` ([source](https://androidauthority.com/android-15-two-factor-authentication-codes-3492585)) |
+| 2FA codes | Notification listener + code extraction | 🟡 | **Android 15 hides OTPs** from untrusted listeners. Fixed through the shell (built-in mode or Shizuku): `appops set <pkg> RECEIVE_SENSITIVE_NOTIFICATIONS allow`, done in one tap (v0.2) ([source](https://androidauthority.com/android-15-two-factor-authentication-codes-3492585)) |
 | OCR | **On the PC**, with the OS engine (Windows.Media.Ocr, Tesseract on Linux, Vision on macOS) | ✅ | Not ML Kit on the phone: proprietary, breaks F-Droid |
 | Blur sensitive data | v1 on the PC (OCR returns word positions). Later on the phone (ONNX models) | 🔴 | Hardest image feature |
 | Crop status/nav bars | Inset sizes + orientation | 🟡 | Full-screen apps have no bars: make it optional |

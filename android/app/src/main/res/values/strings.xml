@@ -100,6 +100,23 @@
     <string name="notices_by_hand">Android shows \"Shell pasted from your clipboard\" after each copy sent. To hide it, turn off Show clipboard access in Settings → Privacy (it applies to every app).</string>
     <string name="notices_open_settings">Open privacy settings</string>
     <string name="notices_failed">Android didn\'t let paste-get change this setting: use Settings → Privacy instead</string>
+    <string name="codes_title">Send 2FA codes</string>
+    <string name="codes_off">Codes from SMS and apps go to your computer\'s clipboard: just paste them</string>
+    <string name="codes_waiting">Waiting for a code. Only the code goes to your computers, marked as secret; never the message.</string>
+    <string name="codes_listener">paste-get: 2FA codes</string>
+    <string name="codes_needs_access">To find codes, paste-get needs to read notifications.</string>
+    <string name="codes_hidden">Android 15 hides codes from apps that read notifications. paste-get can be allowed to see them through the built-in mode or Shizuku.</string>
+    <string name="codes_allow">Allow (one tap)</string>
+    <string name="codes_allowing">Allowing…</string>
+    <string name="codes_allowed">Allowed</string>
+    <string name="codes_allow_failed">Could not allow: %s</string>
+    <string name="codes_open_settings">Open notification access</string>
+    <string name="codes_restricted">If Android says the setting is restricted: App info → ⋮ → Allow restricted settings, then try again. With the built-in mode or Shizuku running (Send what you copy), one tap does it all.</string>
+    <string name="codes_needs_shell">Turn on Send what you copy with the built-in mode (or Shizuku), then come back here.</string>
+    <plurals name="last_code">
+        <item quantity="one">Last code, from %1$s at %2$s, sent to %3$d computer</item>
+        <item quantity="other">Last code, from %1$s at %2$s, sent to %3$d computers</item>
+    </plurals>
     <string name="copies_channel">Sending copies</string>
     <string name="copies_paused_title">Copies are not sent</string>
     <string name="copies_paused_text">Open paste-get to send what you copy again</string>

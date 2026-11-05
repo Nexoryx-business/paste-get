@@ -53,7 +53,7 @@ object ShellHelper {
         }
         say("shell helper started as uid ${Process.myUid()}")
         Looper.prepareMainLooper()
-        val service = ShellClipboardService(null)
+        val service = ShellClipboardService(null, appPackage)
         // Nothing to do once the app is gone: Android may have stopped it; it starts a new helper.
         service.onAppGone = {
             say("shell helper: the app went away, ending")

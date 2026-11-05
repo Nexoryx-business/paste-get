@@ -424,6 +424,29 @@ default browser. Nothing opens without a click.
 Report whether the click works on Windows 11, KDE Plasma and your Hyprland notification daemon
 (mako, dunst, swaync: some need a setting or a keybinding to invoke an action).
 
+## 14. 2FA codes (v0.2)
+
+On the phone, **Send 2FA codes** finds one-time codes in notifications (an SMS, a bank or login
+app) and puts just the code on the computers' clipboard, as a secret: `Ctrl+V` pastes it. The PC
+shows "Code from <app> (<phone>) ✓", never the code.
+
+It needs notification access, and on Android 15 (the POCO) the right to see codes, which Android
+otherwise hides from apps that read notifications. With the built-in mode (or Shizuku) running,
+**Allow (one tap)** grants both. Without, the card opens Settings → Notification access, and
+Android 15 keeps hiding the codes.
+
+| # | Do this | Expected |
+|---|---|---|
+| C1 | With the built-in mode running, turn on **Send 2FA codes**, tap **Allow (one tap)** | "Allowed"; the card says "Waiting for a code" |
+| C2 | Get a code by SMS (log in to a site that texts one, or have someone send "Your code is 482913") | Within a second or two, the PC shows "Code from Messages (<phone>) ✓"; `Ctrl+V` pastes 482913 |
+| C3 | Open `Win+V` (or Klipper) | The code is not in the clipboard history; the tray's *Recent* doesn't list it |
+| C4 | A code from an app's notification (bank, Google prompt, authenticator push) | Same as C2, with that app's name |
+| C5 | An SMS with an order number or an amount and no "code" word | Nothing is sent |
+| C6 | Turn off **Send 2FA codes**, get another code | Nothing is sent |
+
+If a code isn't found, report the shape of the message (with the digits changed) so the detector
+can learn it.
+
 ## Known limitations
 
 - If the PC changes address while the phone is connected, the phone notices only when the old

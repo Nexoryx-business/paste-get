@@ -150,6 +150,9 @@ class ShizukuClipboard(
         }
     }
 
+    /** The shell service, while it watches the clipboard. */
+    fun shell(): IShellClipboard? = service
+
     /** Shows Shizuku's own dialog. Call it from an activity in front. */
     fun requestPermission() {
         if (Shizuku.pingBinder()) Shizuku.requestPermission(PERMISSION_REQUEST)
@@ -222,6 +225,6 @@ class ShizukuClipboard(
         const val PER_USER_RANGE = 100_000
 
         /** Raise when IShellClipboard changes: Shizuku then replaces a service left running. */
-        const val SERVICE_VERSION = 1
+        const val SERVICE_VERSION = 2
     }
 }

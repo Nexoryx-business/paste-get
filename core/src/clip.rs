@@ -12,7 +12,7 @@ use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::identity::DeviceId;
-use crate::proto::{Ack, AckStatus, ClipChunk, ClipOffer, Envelope, envelope::Payload};
+use crate::proto::{Ack, AckStatus, ClipChunk, ClipKind, ClipOffer, Envelope, envelope::Payload};
 
 /// Largest `data` in one chunk.
 pub const MAX_CHUNK_LEN: usize = 256 * 1024;
@@ -54,6 +54,9 @@ const SHA256_LEN: usize = 32;
 #[error("could not generate a random clip ID")]
 pub struct RandomError;
 
+/// Longest app name a one-time code carries, in characters.
+pub const MAX_SOURCE_APP_CHARS: usize = 64;
+
 /// Clipboard content in one representation.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Clip {
@@ -63,6 +66,17 @@ pub struct Clip {
     pub sensitive: bool,
     /// Device where the clip was first copied.
     pub origin: DeviceId,
+    pub kind: Kind,
+}
+
+/// What a clip is, beyond its type, when its source knows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    /// Something the user copied, or a kind this version doesn't know.
+    #[default]
+    Copy,
+    /// A one-time code (2FA) the phone found in a notification of `app`. Always sensitive text.
+    OneTimeCode { app: String },
 }
 
 impl Clip {
@@ -72,6 +86,7 @@ impl Clip {
             data: text.into().into_bytes(),
             sensitive: false,
             origin,
+            kind: Kind::Copy,
         }
     }
 
@@ -81,6 +96,18 @@ impl Clip {
             data,
             sensitive: false,
             origin,
+            kind: Kind::Copy,
+        }
+    }
+
+    /// A one-time code found in a notification of `app`.
+    pub fn one_time_code(code: impl Into<String>, app: &str, origin: DeviceId) -> Self {
+        Self {
+            sensitive: true,
+            kind: Kind::OneTimeCode {
+                app: source_app_name(app),
+            },
+            ..Self::text(code, origin)
         }
     }
 
@@ -104,6 +131,7 @@ impl fmt::Debug for Clip {
             .field("len", &self.data.len())
             .field("sensitive", &self.sensitive)
             .field("origin", &self.origin)
+            .field("kind", &self.kind)
             .finish()
     }
 }
@@ -122,6 +150,15 @@ pub fn outgoing(clip: &Clip) -> Result<impl Iterator<Item = Envelope> + '_, Rand
         mime_type: clip.mime_type.clone(),
         size: clip.data.len() as u64,
         sensitive: clip.sensitive,
+        kind: match clip.kind {
+            Kind::Copy => ClipKind::Copy,
+            Kind::OneTimeCode { .. } => ClipKind::OneTimeCode,
+        }
+        .into(),
+        source_app: match &clip.kind {
+            Kind::Copy => String::new(),
+            Kind::OneTimeCode { app } => app.clone(),
+        },
     });
     let chunks = clip
         .data
@@ -167,6 +204,7 @@ struct Incoming {
     mime_type: String,
     size: u64,
     sensitive: bool,
+    kind: Kind,
     data: Vec<u8>,
 }
 
@@ -215,6 +253,13 @@ impl ClipReceiver {
             return reject(AckStatus::TooLarge);
         }
 
+        // A one-time code is sensitive text; any other offer of that kind is a plain copy.
+        let kind = match offer.kind() {
+            ClipKind::OneTimeCode if offer.mime_type == mime::TEXT => Kind::OneTimeCode {
+                app: source_app_name(&offer.source_app),
+            },
+            _ => Kind::Copy,
+        };
         let incoming = Incoming {
             // Grow as chunks arrive rather than trusting `size` for one big allocation.
             data: Vec::with_capacity(offer.size.min(MAX_CHUNK_LEN as u64) as usize),
@@ -223,7 +268,8 @@ impl ClipReceiver {
             sha256: offer.sha256,
             mime_type: offer.mime_type,
             size: offer.size,
-            sensitive: offer.sensitive,
+            sensitive: offer.sensitive || kind != Kind::Copy,
+            kind,
         };
         if incoming.size == 0 {
             return finish(incoming);
@@ -280,8 +326,23 @@ fn finish(incoming: Incoming) -> Received {
             data: incoming.data,
             sensitive: incoming.sensitive,
             origin: incoming.origin,
+            kind: incoming.kind,
         },
         ack,
+    }
+}
+
+/// An app name from another device, fit to show: no control characters, at most
+/// [`MAX_SOURCE_APP_CHARS`], never empty.
+fn source_app_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_SOURCE_APP_CHARS)
+        .collect();
+    match cleaned.trim() {
+        "" => "an app".to_owned(),
+        trimmed => trimmed.to_owned(),
     }
 }
 
@@ -427,16 +488,67 @@ mod tests {
     #[test]
     fn rejects_invalid_utf8_text() {
         let clip = Clip {
-            mime_type: mime::TEXT.into(),
             data: vec![0xff, 0xfe],
-            sensitive: false,
-            origin: ORIGIN,
+            ..Clip::text("", ORIGIN)
         };
 
         assert_eq!(
             status(&transfer(&clip, &mut ClipReceiver::default())),
             AckStatus::ProtocolError
         );
+    }
+
+    #[test]
+    fn a_one_time_code_arrives_sensitive_with_its_app() {
+        let code = Clip::one_time_code("482913", "Messages\u{7}", ORIGIN);
+        assert_eq!(
+            code.kind,
+            Kind::OneTimeCode {
+                app: "Messages".into()
+            }
+        );
+
+        let Received::Clip { clip, .. } = transfer(&code, &mut ClipReceiver::default()) else {
+            panic!("the code was refused");
+        };
+        assert_eq!(clip, code);
+
+        // Sensitive even if the sender forgot, and the app name is cleaned up.
+        let mut offer = offer_of(&code);
+        offer.sensitive = false;
+        offer.source_app = format!("\n{}\n", "x".repeat(100));
+        offer.size = 0;
+        offer.sha256 = sha256(b"").to_vec();
+        let Received::Clip { clip, .. } = ClipReceiver::default().on_offer(offer) else {
+            panic!("the empty code was refused");
+        };
+        assert!(clip.sensitive);
+        assert_eq!(
+            clip.kind,
+            Kind::OneTimeCode {
+                app: "x".repeat(MAX_SOURCE_APP_CHARS)
+            }
+        );
+    }
+
+    #[test]
+    fn an_unknown_kind_or_a_code_that_is_not_text_is_a_copy() {
+        let mut offer = offer_of(&Clip::text("", ORIGIN));
+        offer.kind = 99;
+        let Received::Clip { clip, .. } = ClipReceiver::default().on_offer(offer) else {
+            panic!("refused");
+        };
+        assert_eq!(clip.kind, Kind::Copy);
+        assert!(!clip.sensitive);
+
+        let image = Clip {
+            kind: Kind::OneTimeCode { app: "x".into() },
+            ..Clip::png(png_of_len(20), ORIGIN)
+        };
+        let Received::Clip { clip, .. } = transfer(&image, &mut ClipReceiver::default()) else {
+            panic!("refused");
+        };
+        assert_eq!(clip.kind, Kind::Copy);
     }
 
     #[test]
@@ -454,8 +566,7 @@ mod tests {
         let jpeg = Clip {
             mime_type: mime::JPEG.to_owned(),
             data: b"\xff\xd8\xff\xe0 rest of the file".to_vec(),
-            sensitive: false,
-            origin: ORIGIN,
+            ..Clip::png(Vec::new(), ORIGIN)
         };
         let Received::Clip { clip, .. } = transfer(&jpeg, &mut ClipReceiver::default()) else {
             panic!("the JPEG was refused");

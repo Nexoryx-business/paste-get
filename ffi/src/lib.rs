@@ -22,7 +22,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use pasteget_core::clip::{Clip, mime};
+use pasteget_core::clip::{Clip, Kind, mime};
 use pasteget_core::echo::EchoGuard;
 use pasteget_core::identity::{DeviceId, Identity};
 use pasteget_core::pairing::{self, PairingInvite, sanitize_device_name};
@@ -292,6 +292,21 @@ impl PhoneClient {
         }
         Some(self.broadcast(mime::TEXT, data, sensitive))
     }
+
+    /// Sends a one-time code found in a notification of `app` (its name, e.g. "Messages") to
+    /// every connected computer, which puts it on its clipboard as a secret. Returns how many.
+    pub fn send_one_time_code(&self, code: String, app: String) -> u32 {
+        let clip = Clip::one_time_code(code, &app, self.state.identity.device_id());
+        // If the user also copies it, the automatic copy doesn't send it a second time.
+        lock(&self.state.guard).should_send(&clip.mime_type, &clip.data);
+        self.broadcast_clip(&clip)
+    }
+}
+
+/// The one-time code (2FA) in a notification's text, digits only, if it has one.
+#[uniffi::export]
+pub fn find_one_time_code(text: String) -> Option<String> {
+    pasteget_core::detect::one_time_code(&text)
 }
 
 impl PhoneClient {
@@ -308,8 +323,13 @@ impl PhoneClient {
             data,
             sensitive,
             origin: self.state.identity.device_id(),
+            kind: Kind::Copy,
         };
-        u32::try_from(self.state.peers.broadcast(&clip, None)).unwrap_or(u32::MAX)
+        self.broadcast_clip(&clip)
+    }
+
+    fn broadcast_clip(&self, clip: &Clip) -> u32 {
+        u32::try_from(self.state.peers.broadcast(clip, None)).unwrap_or(u32::MAX)
     }
 
     fn is_running(&self) -> bool {
