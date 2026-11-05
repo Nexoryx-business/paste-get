@@ -13,6 +13,7 @@
 mod menu;
 mod pairing;
 mod settings;
+mod startup;
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +27,7 @@ use pasteget_desktop::clipboard::SystemClipboard;
 use pasteget_desktop::config::{DEFAULT_PROFILE, Profile};
 use pasteget_desktop::control::{self, Endpoint, Request, Response};
 use pasteget_desktop::daemon::{Daemon, DaemonOptions};
-use pasteget_desktop::notify::DesktopNotifier;
+use pasteget_desktop::notify::{DesktopNotifier, Notifier};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
@@ -56,6 +57,9 @@ struct Cli {
     /// Profile to use, as with `pasteget --profile`.
     #[arg(long, default_value = DEFAULT_PROFILE)]
     profile: String,
+    /// Started at login rather than by the user: no notice saying it runs.
+    #[arg(long, hide = true)]
+    at_login: bool,
 }
 
 /// Shared by the menu handler and the refresh loop.
@@ -75,6 +79,8 @@ struct Tray {
     pairing: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     /// Held while the hosted daemon starts or restarts, so only one runs.
     starting: tokio::sync::Mutex<()>,
+    /// Started at login: no "paste-get is running" notice.
+    at_login: bool,
 }
 
 struct Hosted {
@@ -83,16 +89,14 @@ struct Hosted {
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-    match run(&Cli::parse()) {
+    let cli = Cli::parse();
+    let log = startup::init_logs(&cli.profile);
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), profile = %cli.profile, "tray starting");
+    match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{e:#}");
+            startup::show_fatal(&format!("{e:#}"), log.as_deref());
             ExitCode::FAILURE
         }
     }
@@ -100,6 +104,12 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> Result<()> {
     let profile = Profile::open(&cli.profile)?;
+    // One tray per profile: a second one would show a second icon, and look like it did nothing.
+    let Some(_lock) = startup::lock_profile(&profile)? else {
+        tracing::info!("another tray already runs for this profile");
+        startup::notify_once(startup::already_running_notice());
+        return Ok(());
+    };
     let autostart = if autostart::SUPPORTED {
         Autostart::for_profile(profile.name())
             .inspect_err(|e| tracing::warn!(error = %e, "can't start at login"))
@@ -107,6 +117,13 @@ fn run(cli: &Cli) -> Result<()> {
     } else {
         None
     };
+    // Rewritten each start: it follows the program if it moved, and gets `--at-login`.
+    if let Some(autostart) = &autostart
+        && autostart.is_enabled()
+        && let Err(e) = login_launch(profile.name()).and_then(|launch| autostart.enable(&launch))
+    {
+        tracing::warn!(error = %format!("{e:#}"), "could not update starting at login");
+    }
     let tray = Arc::new(Tray {
         endpoint: Endpoint::for_profile(&profile),
         profile,
@@ -116,6 +133,7 @@ fn run(cli: &Cli) -> Result<()> {
         redraw: AtomicBool::new(false),
         pairing: Mutex::new(None),
         starting: tokio::sync::Mutex::new(()),
+        at_login: cli.at_login,
     });
 
     let for_setup = Arc::clone(&tray);
@@ -265,6 +283,9 @@ async fn refresh_loop<R: Runtime>(app: AppHandle<R>, tray: Arc<Tray>) {
             offered_pairing = true;
             if status.devices.is_empty() {
                 open_pairing(&app, &tray);
+            } else if !tray.at_login {
+                // Opened by the user, who sees no window: say where the icon is.
+                DesktopNotifier::start().notice(startup::running_notice());
             }
         }
 
@@ -341,7 +362,7 @@ impl Tray {
         if autostart.is_enabled() {
             autostart.disable()
         } else {
-            autostart.enable(&Launch::this_program(self.profile.name())?)
+            autostart.enable(&login_launch(self.profile.name())?)
         }
     }
 
@@ -400,6 +421,13 @@ impl Tray {
             tracing::info!("daemon stopped");
         }
     }
+}
+
+/// How the tray starts at login: this program, marked so it doesn't announce itself.
+fn login_launch(profile: &str) -> Result<Launch> {
+    let mut launch = Launch::this_program(profile)?;
+    launch.args.push("--at-login".into());
+    Ok(launch)
 }
 
 /// A window's own Close button. (A page can't close its window by itself.)

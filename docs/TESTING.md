@@ -302,8 +302,13 @@ see its log). Keep the fake phone of section 2 running.
 | T16 | In *Settings…*, rename this computer, **Save** | "Saved. paste-get restarted…"; within seconds the phone reconnects and shows the new name |
 | T17 | In *Settings…*, click a hotkey field, press Ctrl+Alt+K, **Save**, then press Ctrl+Alt+K | It does that action (KDE may ask to allow the shortcut again). Backspace in the field turns the hotkey off |
 | T18 | In *Settings…*, give both hotkeys the same keys, **Save** | An error says so; nothing is saved |
+| T19 | With the tray running, open paste-get again from the Start menu | A notification: "paste-get is already running: its icon is in the notification area…"; no second icon |
+| T20 | Quit, then open paste-get from the Start menu (a phone is paired) | A notification says where its icon is. At login (*Start at login* on), no such notification |
+| T21 | Open `%LOCALAPPDATA%\paste-get\logs\pasteget-tray.log` (Linux: `~/.local/share/paste-get/logs/`) | The tray's log, with "tray starting" for each start. Attach it to any report |
 | T14 | Windows: get a notification (an image from the phone, or a hotkey's) | It says it comes from **paste-get**, with its icon, not "Windows PowerShell". After uninstalling, paste-get is gone from Settings → System → Notifications |
 | T13 | Last: menu → the phone → *Forget this device* | The phone disappears from the menu within 2 s and can't reconnect. Within a few seconds the real phone shows "<PC> unpaired this phone" and drops the computer from its list. Pair again to go on |
+
+If paste-get doesn't start at all, Windows shows a box saying why, and the log has the details.
 
 Report which rows passed on Windows 11, KDE Plasma and Hyprland, and anything that looks wrong
 in the menu (cut-off text, missing ticks, a menu that closes by itself).

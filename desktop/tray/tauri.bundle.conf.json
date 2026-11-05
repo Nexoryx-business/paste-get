@@ -11,7 +11,7 @@
     "homepage": "https://github.com/Nexoryx-business/paste-get",
     "externalBin": ["binaries/pasteget"],
     "windows": {
-      "webviewInstallMode": { "type": "skip" },
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": {
         "installMode": "currentUser",
         "startMenuFolder": "paste-get",

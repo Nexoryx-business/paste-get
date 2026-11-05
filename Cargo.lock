@@ -3091,15 +3091,18 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "pasteget-desktop",
  "qrcode",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -16,7 +16,9 @@ Every push that changes the packaging builds all four, without releasing: they'r
 artifacts. A `v*` tag builds them and puts them, with a `SHA256SUMS` file, in a **draft**
 GitHub release.
 
-The Windows installer doesn't install WebView2: the tray has no window, so it never needs it.
+The Windows installer installs WebView2 if the PC doesn't have it (Windows 11 always does): the
+*Pair a phone* and *Settings* windows need it. It then downloads Microsoft's bootstrapper, silently;
+nothing is downloaded when WebView2 is there.
 
 ### Building them yourself
 
