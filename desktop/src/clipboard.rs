@@ -166,6 +166,8 @@ pub trait ClipboardBackend: Send + 'static {
     /// Current content, or `None` if empty or in a format paste-get doesn't handle.
     fn read(&mut self) -> Result<Option<Raw>>;
 
+    /// Puts a clip from another device on the clipboard. It never goes to the Windows cloud
+    /// clipboard; a sensitive one stays out of clipboard history too.
     fn write(&mut self, raw: &Raw, sensitive: bool) -> Result<()>;
 
     /// Cheap pre-check before [`ClipboardBackend::read`]. `false` means the content surely
@@ -215,6 +217,8 @@ impl ClipboardBackend for SystemClipboard {
         let mut set = self.inner.set();
         if sensitive {
             set = exclude_from_history(set);
+        } else {
+            set = exclude_from_cloud(set);
         }
         match raw {
             Raw::Text(text) => set.text(text.as_str()),
@@ -261,6 +265,21 @@ fn exclude_from_history(set: arboard::Set<'_>) -> arboard::Set<'_> {
     {
         use arboard::SetExtLinux;
         set.exclude_from_history()
+    }
+}
+
+/// Keeps a received clip out of the Windows cloud clipboard, which would upload it to the user's
+/// Microsoft account and other PCs: paste-get promises clips only go to paired devices. It still
+/// shows in the local history (Win+V). Nothing to do elsewhere.
+fn exclude_from_cloud(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    #[cfg(windows)]
+    {
+        use arboard::SetExtWindows;
+        set.exclude_from_cloud()
+    }
+    #[cfg(not(windows))]
+    {
+        set
     }
 }
 

@@ -246,6 +246,7 @@ Watch the PC daemon's terminal, and on the phone `adb logcat -s paste-get` if yo
 | A4 | Copy text **on the PC**, paste it on the phone, wait 5 s | The PC does not receive it back from the phone |
 | A5 | During A2: does the phone show a notice like "Shell pasted from your clipboard"? | Report what it says (Android 12+ may show one; Settings → Privacy → "Show clipboard access" turns it off) |
 | A6 | Copy a password from a password manager (Bitwarden, KeePassDX…), paste it on the PC | Pasted, and absent from Windows' clipboard history (`Win+V`) or Klipper |
+| A7 | Windows, if you have a second PC on the same Microsoft account with *Settings → System → Clipboard → Share across devices* on: copy text on the phone, then `Win+V` on the other PC | Not there (it is in this PC's own `Win+V` history) |
 | B1 | With Shizuku running, tap **Grant them (paste-get restarts)** | paste-get restarts. The card says "Ready for when Shizuku stops" |
 | B2 | In Shizuku, tap **Stop**. Back in paste-get | Within a few seconds Android asks to allow access to the device logs: allow it. The card says "Mode: fallback, through the system log" |
 | B3 | Go to another app, copy text, paste on the PC | Pasted. Report whether anything flashed or the keyboard closed |

@@ -108,6 +108,8 @@ Goal: take a screenshot on the POCO, press `Ctrl+V` on Windows or Arch, and it's
   first start, so no terminal is needed
 - [x] PC side can revoke a paired phone: `pasteget forget <name>`, or the tray menu → the phone
   → *Forget this device*; its session ends at once
+- [x] Received clips never go to the Windows cloud clipboard (Microsoft account sync); they stay
+  in the local `Win+V` history unless sensitive
 
 ## v0.2 — "smart"
 History + search, 2FA codes, PC-side OCR, sensitive filters, auto-crop, smart actions.
