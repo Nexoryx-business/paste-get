@@ -46,7 +46,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The Run key, for starting at login.
-windows-registry = "0.6"
+windows-registry = "0.100"
 # Toasts that call back when clicked (a link to open). notify-rust uses it underneath.
 tauri-winrt-notification = "0.8"
 
