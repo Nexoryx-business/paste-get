@@ -229,6 +229,10 @@ pub struct Settings {
     pub notify: NotifyFor,
     /// A link copied on another device shows a notification that opens it when clicked.
     pub offer_to_open_links: bool,
+    /// Announce the computer's name in mDNS TXT records. When false, the name is
+    /// omitted for privacy on shared/public networks.
+    #[serde(default = "default_announce_name")]
+    pub announce_name: bool,
     /// Global hotkeys. Tables stay last: TOML puts them after plain keys.
     pub hotkeys: HotkeySettings,
     /// The clipboard history, `[history]`.
@@ -270,6 +274,10 @@ pub enum NotifyFor {
     All,
 }
 
+fn default_announce_name() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let host = gethostname::gethostname().to_string_lossy().into_owned();
@@ -285,6 +293,7 @@ impl Default for Settings {
             port: DEFAULT_PORT,
             notify: NotifyFor::default(),
             offer_to_open_links: true,
+            announce_name: true,
             hotkeys: HotkeySettings::default(),
             history: HistorySettings::default(),
         }
@@ -452,6 +461,25 @@ fn parse_known_devices(bytes: &[u8]) -> Result<(KnownDevices, usize), &'static s
     Ok((KnownDevices(devices), left_out))
 }
 
+#[cfg(windows)]
+fn restrict_windows_permissions(path: &Path, is_dir: bool) {
+    if let Some(username) = std::env::var_os("USERNAME") {
+        let perm = if is_dir {
+            format!("{}:(OI)(CI)F", username.to_string_lossy())
+        } else {
+            format!("{}:F", username.to_string_lossy())
+        };
+        let _ = std::process::Command::new("icacls")
+            .arg(path)
+            .arg("/inheritance:r")
+            .arg("/grant:r")
+            .arg(perm)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
 fn create_private_dir(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
     #[cfg(unix)]
@@ -460,12 +488,17 @@ fn create_private_dir(dir: &Path) -> Result<()> {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
             .with_context(|| format!("could not restrict access to {}", dir.display()))?;
     }
+    #[cfg(windows)]
+    {
+        restrict_windows_permissions(dir, true);
+    }
     Ok(())
 }
 
 /// Writes `contents` atomically, readable and writable by the current user only.
 ///
-/// On Windows, files under `%APPDATA%` already inherit a per-user ACL.
+/// On Windows, files under `%APPDATA%` already inherit a per-user ACL, and explicit
+/// DACL restrictions are applied to protect custom PASTEGET_HOME locations.
 fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     let temp = path.with_extension("tmp");
     let mut options = fs::OpenOptions::new();
@@ -481,7 +514,12 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     file.write_all(contents)?;
     file.sync_all()?;
     drop(file);
-    fs::rename(&temp, path).with_context(|| format!("could not write {}", path.display()))
+    fs::rename(&temp, path).with_context(|| format!("could not write {}", path.display()))?;
+    #[cfg(windows)]
+    {
+        restrict_windows_permissions(path, false);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -252,9 +252,14 @@ impl Daemon {
         let advertiser = options
             .announce
             .then(|| {
+                let name = if shared.started_with.announce_name {
+                    &shared.device_name
+                } else {
+                    ""
+                };
                 Advertiser::start(
                     shared.identity.device_id(),
-                    &shared.device_name,
+                    name,
                     local_addr.port(),
                 )
             })

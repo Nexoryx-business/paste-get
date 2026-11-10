@@ -114,8 +114,8 @@ Each line is a claim to check. "→" points at where it's enforced.
     directory (Unix); named pipe with the user name, `first_pipe_instance`, remote clients
     rejected (Windows). → `control.rs`
 18. The identity key file is readable by the user only. Unix: created with mode 0600 (via a
-    temporary file, then renamed). Windows: no ACL of its own; it relies on `%APPDATA%` being
-    private to the user. → `config.rs` `write_private_file`
+    temporary file, then renamed). Windows: explicit user-only DACL applied via `icacls` to protect
+    both default and custom `PASTEGET_HOME` locations. → `config.rs` `write_private_file`
 19. Profile names can't escape the configuration directory. → `Profile::open_in`
 20. Clipboard contents never reach the logs. Grep for `tracing::` near `data`, `text`,
     `preview`.
@@ -192,8 +192,9 @@ Each line is a claim to check. "→" points at where it's enforced.
     only HTML put in a page is the QR code's SVG, drawn by the tray from its own invite. The
     pages' CSP allows their own scripts and nothing else (`default-src 'none'`), and the
     addresses they show (the Releases page, the source, a firewall rule) are text to copy, never
-    links: nothing in them goes online. → `pairing.rs` (`script`), `dist/pair.js`,
-    `dist/copy.js`, `tauri.conf.json`
+    links: nothing in them goes online. The pairing window sets display affinity on Windows
+    (`SetWindowDisplayAffinity`) to protect the QR code from screen recording. → `pairing.rs`
+    (`script`, `SetWindowDisplayAffinity`), `dist/pair.js`, `dist/copy.js`, `tauri.conf.json`
 
 ## Known gaps (not bugs to report, but worth an opinion)
 

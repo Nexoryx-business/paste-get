@@ -248,6 +248,17 @@ pub async fn run<R: Runtime>(app: AppHandle<R>, endpoint: Endpoint) -> Result<()
         })
         .build()
         .context("could not open the pairing window")?;
+
+    #[cfg(windows)]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_MONITOR};
+            unsafe {
+                SetWindowDisplayAffinity(hwnd.0 as _, WDA_MONITOR);
+            }
+        }
+    }
+
     tokio::time::timeout(LOAD_TIMEOUT, loaded)
         .await
         .context("the pairing window did not load")?

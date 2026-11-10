@@ -73,11 +73,13 @@ impl Advertiser {
 
         // Unique, stable labels that don't clash with the OS's own mDNS host name.
         let label = format!("paste-get-{}", &device_id.to_string()[..12]).to_lowercase();
-        let properties = [
+        let mut properties = vec![
             ("v", PROTOCOL_VERSION.to_string()),
             ("id", device_id.to_string()),
-            ("name", device_name.to_owned()),
         ];
+        if !device_name.is_empty() {
+            properties.push(("name", device_name.to_owned()));
+        }
         let service = ServiceInfo::new(
             SERVICE_TYPE,
             &label,
@@ -208,6 +210,36 @@ mod tests {
             service.txt_properties.get_property_val_str("name"),
             Some("Test PC (Linux)")
         );
+        assert_eq!(service.txt_properties.get_property_val_str("v"), Some("0"));
+    }
+
+    #[test]
+    fn announcement_without_name_omits_name_property() {
+        let id = Identity::generate().unwrap().device_id();
+        let _advertiser = Advertiser::start(id, "", 47996).unwrap();
+
+        let browser = ServiceDaemon::new().unwrap();
+        let events = browser.browse(SERVICE_TYPE).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut found = None;
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match events.recv_timeout(left) {
+                Ok(ServiceEvent::ServiceResolved(service))
+                    if service.txt_properties.get_property_val_str("id")
+                        == Some(id.to_string().as_str()) =>
+                {
+                    found = Some(service);
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        let _ = browser.shutdown();
+
+        let service = found.expect("the announcement was not seen");
+        assert_eq!(service.port, 47996);
+        assert_eq!(service.txt_properties.get_property_val_str("name"), None);
         assert_eq!(service.txt_properties.get_property_val_str("v"), Some("0"));
     }
 }
