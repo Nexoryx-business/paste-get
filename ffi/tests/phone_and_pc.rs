@@ -216,7 +216,10 @@ fn phone_pairs_then_shares_text_and_screenshots_with_the_pc() {
 
     let listener = Arc::new(Recorder::default());
     phone.start(listener.clone());
-    wait_until("the connection", || phone.connected_count() == 1);
+    // The app hears of the connection on the session's thread, just after the count changes.
+    wait_until("the connection", || {
+        phone.connected_count() == 1 && !listener.connections.lock().unwrap().is_empty()
+    });
     assert_eq!(*listener.connections.lock().unwrap(), [true]);
 
     // Share text: it lands on the PC clipboard.
