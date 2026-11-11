@@ -236,6 +236,9 @@ pub async fn run<R: Runtime>(app: AppHandle<R>, endpoint: Endpoint) -> Result<()
         .resizable(false)
         .center()
         .focused(true)
+        // Screenshots and screen sharing see a blank window instead of the QR code and its
+        // secret (Windows and macOS; Wayland has no equivalent).
+        .content_protected(true)
         .on_page_load(move |_, payload| {
             if payload.event() == PageLoadEvent::Finished
                 && let Some(tx) = loaded_tx
@@ -248,16 +251,6 @@ pub async fn run<R: Runtime>(app: AppHandle<R>, endpoint: Endpoint) -> Result<()
         })
         .build()
         .context("could not open the pairing window")?;
-
-    #[cfg(windows)]
-    {
-        if let Ok(hwnd) = window.hwnd() {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_MONITOR};
-            unsafe {
-                SetWindowDisplayAffinity(hwnd.0 as _, WDA_MONITOR);
-            }
-        }
-    }
 
     tokio::time::timeout(LOAD_TIMEOUT, loaded)
         .await

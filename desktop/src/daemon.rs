@@ -257,11 +257,7 @@ impl Daemon {
                 } else {
                     ""
                 };
-                Advertiser::start(
-                    shared.identity.device_id(),
-                    name,
-                    local_addr.port(),
-                )
+                Advertiser::start(shared.identity.device_id(), name, local_addr.port())
             })
             .transpose()
             .unwrap_or_else(|e| {

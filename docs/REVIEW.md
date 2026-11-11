@@ -192,9 +192,9 @@ Each line is a claim to check. "→" points at where it's enforced.
     only HTML put in a page is the QR code's SVG, drawn by the tray from its own invite. The
     pages' CSP allows their own scripts and nothing else (`default-src 'none'`), and the
     addresses they show (the Releases page, the source, a firewall rule) are text to copy, never
-    links: nothing in them goes online. The pairing window sets display affinity on Windows
-    (`SetWindowDisplayAffinity`) to protect the QR code from screen recording. → `pairing.rs`
-    (`script`, `SetWindowDisplayAffinity`), `dist/pair.js`, `dist/copy.js`, `tauri.conf.json`
+    links: nothing in them goes online. The pairing window is content-protected on Windows and macOS
+    (`content_protected`) to keep the QR code out of screenshots and screen recording. → `pairing.rs`
+    (`script`, `content_protected`), `dist/pair.js`, `dist/copy.js`, `tauri.conf.json`
 
 ## Known gaps (not bugs to report, but worth an opinion)
 
