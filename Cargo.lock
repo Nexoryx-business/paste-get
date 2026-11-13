@@ -3044,7 +3044,7 @@ dependencies = [
  "form_urlencoded",
  "futures-util",
  "if-addrs",
- "miniz_oxide 0.8.9",
+ "miniz_oxide 0.9.1",
  "proptest",
  "prost",
  "prost-build",

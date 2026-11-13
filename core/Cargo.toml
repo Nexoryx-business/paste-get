@@ -22,7 +22,7 @@ form_urlencoded = "1"
 # Tries a pairing code's addresses at once (`FuturesUnordered`).
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # Deflates long texts in the history.
-miniz_oxide = { version = "0.8", optional = true }
+miniz_oxide = { version = "0.9", optional = true }
 prost = "0.14"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 ring = "0.17"
